@@ -1,10 +1,9 @@
-// components/GPSViewer.tsx - Fixed version with proper Street View updates
+// components/GPSViewer.tsx - Updated to work with server GPS data
 import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Navigation, Satellite, MapPin, RefreshCw, AlertTriangle } from 'lucide-react';
-import { ImageData } from '../types';
+import { Navigation, Satellite, MapPin, RefreshCw, AlertTriangle, Route } from 'lucide-react';
 
 // Complete Google Maps type declarations
 declare global {
@@ -28,13 +27,36 @@ declare global {
   }
 }
 
+interface ImageData {
+  timestamp: string;
+  date: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  detections: any[];
+  images: { [cameraName: string]: { [className: string]: string[] } };
+  fullPaths: { [cameraName: string]: { [className: string]: string[] } };
+}
+
+interface GPSData {
+  timestamp: string;
+  time: string;
+  date: string;
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+  speed?: number;
+  heading?: number;
+}
+
 interface GPSViewerProps {
   currentData: ImageData;
   allData: ImageData[];
+  gpsData: GPSData[];
   className?: string;
 }
 
-const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className = '' }) => {
+const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, className = '' }) => {
   const [streetViewLoaded, setStreetViewLoaded] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -51,6 +73,9 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
 
   // Google Maps API key - replace with your actual key
   const GOOGLE_MAPS_API_KEY = "AIzaSyA7k2rXZ_EIPf768ZogKJhfZAhBTR06lvI";
+
+  // Use GPS data if available, fallback to timeline data
+  const routeData = gpsData.length > 0 ? gpsData : allData;
 
   // Utility function to create custom marker icons
   const createMarkerIcon = (color: string, label?: string, size: number = 20) => {
@@ -115,7 +140,6 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
     };
 
     script.onload = () => {
-      // Script loaded but callback not yet called
       console.log('Google Maps script loaded, waiting for callback...');
     };
 
@@ -195,11 +219,11 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
     } catch (error) {
       console.error('Error updating Street View position:', error);
     }
-  }, [currentData.latitude, currentData.longitude, currentData.timestamp]); // Dependencies include lat/lng and timestamp
+  }, [currentData.latitude, currentData.longitude, currentData.timestamp]);
 
   // Initialize Map with route
   useEffect(() => {
-    if (!mapLoaded || !mapRef.current || allData.length === 0 || !window.google?.maps) {
+    if (!mapLoaded || !mapRef.current || routeData.length === 0 || !window.google?.maps) {
       return;
     }
 
@@ -226,7 +250,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
       console.error('Error initializing map:', error);
       setApiError('Failed to initialize map');
     }
-  }, [mapLoaded, allData]);
+  }, [mapLoaded, routeData]);
 
   // Update map when current data changes
   useEffect(() => {
@@ -286,7 +310,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
   };
 
   const updateRoute = () => {
-    if (!mapInstanceRef.current || !window.google?.maps || allData.length < 2) return;
+    if (!mapInstanceRef.current || !window.google?.maps || routeData.length < 2) return;
 
     try {
       // Clear existing route
@@ -294,8 +318,8 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
         routePolylineRef.current.setMap(null);
       }
 
-      // Create route path
-      const routePath = allData.map(data => ({
+      // Create route path from GPS data
+      const routePath = routeData.map(data => ({
         lat: data.latitude,
         lng: data.longitude
       }));
@@ -359,6 +383,34 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
     const direction = type === 'lat' ? (coord >= 0 ? 'N' : 'S') : (coord >= 0 ? 'E' : 'W');
     return `${Math.abs(coord).toFixed(6)}° ${direction}`;
   };
+
+  const calculateDistance = () => {
+    if (routeData.length < 2) return 0;
+    
+    // Simple distance calculation (Haversine formula could be more accurate)
+    let totalDistance = 0;
+    for (let i = 1; i < routeData.length; i++) {
+      const prev = routeData[i - 1];
+      const curr = routeData[i];
+      
+      const lat1 = prev.latitude * Math.PI / 180;
+      const lat2 = curr.latitude * Math.PI / 180;
+      const deltaLat = (curr.latitude - prev.latitude) * Math.PI / 180;
+      const deltaLng = (curr.longitude - prev.longitude) * Math.PI / 180;
+      
+      const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
+                Math.cos(lat1) * Math.cos(lat2) *
+                Math.sin(deltaLng/2) * Math.sin(deltaLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distance = 6371 * c; // Earth's radius in km
+      
+      totalDistance += distance;
+    }
+    
+    return totalDistance;
+  };
+
+  const totalDistance = calculateDistance();
 
   // Loading state
   if (isLoadingMaps) {
@@ -426,6 +478,10 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
               GPS Location & Navigation
             </CardTitle>
             <div className="flex items-center gap-2">
+              <Badge variant={gpsData.length > 0 ? "default" : "secondary"} className="text-xs">
+                <Route className="w-3 h-3 mr-1" />
+                {gpsData.length > 0 ? 'GPS Log Data' : 'Timeline Data'}
+              </Badge>
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -444,29 +500,35 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-red-500" />
               <div>
-                <div className="text-sm font-medium">Latitude</div>
+                <div className="text-sm font-medium">Current Position</div>
                 <div className="text-xs text-gray-600">{formatCoordinate(currentData.latitude, 'lat')}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-blue-500" />
-              <div>
-                <div className="text-sm font-medium">Longitude</div>
                 <div className="text-xs text-gray-600">{formatCoordinate(currentData.longitude, 'lng')}</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Satellite className="w-4 h-4 text-green-500" />
               <div>
-                <div className="text-sm font-medium">Location</div>
-                <div className="text-xs text-gray-600">Yokosuka, Kanagawa, JP</div>
+                <div className="text-sm font-medium">Data Source</div>
+                <div className="text-xs text-gray-600">
+                  {gpsData.length > 0 ? 'F2/gps_log.csv' : 'Timeline coordinates'}
+                </div>
+                <div className="text-xs text-gray-600">{routeData.length} points</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Route className="w-4 h-4 text-blue-500" />
+              <div>
+                <div className="text-sm font-medium">Route Distance</div>
+                <div className="text-xs text-gray-600">
+                  {totalDistance > 0 ? `${totalDistance.toFixed(2)} km` : 'Calculating...'}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Navigation className="w-4 h-4 text-purple-500" />
               <div>
-                <div className="text-sm font-medium">Data Points</div>
-                <div className="text-xs text-gray-600">{allData.length} locations</div>
+                <div className="text-sm font-medium">Location</div>
+                <div className="text-xs text-gray-600">Yokosuka, Kanagawa, JP</div>
               </div>
             </div>
           </div>
@@ -522,7 +584,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
               <div className="flex items-center gap-2">
                 {showRoute && (
                   <Badge variant="secondary" className="text-xs">
-                    {allData.length} points
+                    {routeData.length} points
                   </Badge>
                 )}
                 <Badge variant="outline" className="text-xs">
@@ -548,7 +610,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Satellite className="w-5 h-5" />
-            GPS Statistics
+            GPS Statistics & Data Summary
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -563,21 +625,27 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
                   </span>
                 </div>
                 <div className="text-xs text-gray-500">
-                  Timestamp: {currentData.timestamp}
+                  Timestamp: {currentData.timestamp.split(' ')[1]}
                 </div>
               </div>
             </div>
 
             <div>
-              <h4 className="font-medium mb-2">Route Info</h4>
+              <h4 className="font-medium mb-2">Data Source Info</h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
-                  <span>Total Points:</span>
+                  <span>GPS Points:</span>
+                  <span>{gpsData.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Timeline Points:</span>
                   <span>{allData.length}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>With Detections:</span>
-                  <span>{allData.filter(d => d.detections.length > 0).length}</span>
+                  <span>Active Source:</span>
+                  <Badge variant="outline" className="text-xs">
+                    {gpsData.length > 0 ? 'GPS Log' : 'Timeline'}
+                  </Badge>
                 </div>
               </div>
             </div>
@@ -587,11 +655,15 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span>Start:</span>
-                  <span className="text-xs">{allData[0]?.time.split('.')[0] || 'N/A'}</span>
+                  <span className="text-xs">{routeData[0]?.time.split('.')[0] || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Current:</span>
                   <span className="text-xs">{currentData.time.split('.')[0]}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>End:</span>
+                  <span className="text-xs">{routeData[routeData.length - 1]?.time.split('.')[0] || 'N/A'}</span>
                 </div>
               </div>
             </div>
@@ -604,8 +676,12 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, className =
                   <span>{currentData.detections.length}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Total:</span>
+                  <span>Total Detections:</span>
                   <span>{allData.reduce((sum, d) => sum + d.detections.length, 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Route Distance:</span>
+                  <span>{totalDistance > 0 ? `${totalDistance.toFixed(1)}km` : 'N/A'}</span>
                 </div>
               </div>
             </div>

@@ -1,598 +1,431 @@
-// utils/dataLoader.ts - Fixed version with better error handling and HTTP server integration
-import { SessionData, DetectionData, GPSData, SystemMetrics, ImageData, CameraData } from '../types';
+// utils/dataLoader.ts - Updated to use server API endpoints
+export interface DetectionData {
+  frameNum: number;
+  streamId: number;
+  className: string;
+  confidence: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  timestamp?: string;
+}
+
+export interface ImageData {
+  timestamp: string;
+  date: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  detections: DetectionData[];
+  images: { [cameraName: string]: { [className: string]: string[] } };
+  fullPaths: { [cameraName: string]: { [className: string]: string[] } };
+}
+
+export interface CameraInfo {
+  name: string;
+  displayName: string;
+  type: string;
+  resolution: string;
+  color: string;
+  description?: string;
+  detectionCount: number;
+  classes: string[];
+}
+
+export interface SystemMetrics {
+  timestamp: string;
+  time: string;
+  date: string;
+  cpu_usage_percent: number;
+  gpu_usage_percent: number;
+  memory_usage_percent: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  swap_usage_percent: number;
+  swap_used_mb: number;
+  swap_total_mb: number;
+  disk_usage_percent: number;
+  disk_used_gb: number;
+  disk_total_gb: number;
+  cpu_temp_celsius: number;
+  gpu_temp_celsius: number;
+  thermal_temp_celsius: number;
+  fan_speed_percent: number;
+  power_total_watts: number;
+  power_cpu_watts: number;
+  power_gpu_watts: number;
+  uptime_seconds: number;
+}
+
+export interface GPSData {
+  timestamp: string;
+  time: string;
+  date: string;
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+  speed?: number;
+  heading?: number;
+}
+
+export interface SessionData {
+  sessionName: string;
+  sessionPath: string;
+  cameras: CameraInfo[];
+  timeline: ImageData[];
+  gpsData: GPSData[];
+  systemMetrics: SystemMetrics[];
+}
 
 export class DataLoader {
-  private basePath: string;
-  private baseUrl: string;
-  private isHttpMode: boolean;
+  private serverUrl: string;
 
-  constructor(basePath: string = '/home/shanks/Music/01-01-70-01-10-47-835') {
-    this.basePath = basePath;
-    // Always use HTTP mode in browser environment
-    this.isHttpMode = typeof window !== 'undefined';
-    
-    if (this.isHttpMode) {
-      // Use HTTP server for file access - adjust port if needed
-      this.baseUrl = 'http://localhost:8081/data';
-      console.log('DataLoader: Using HTTP mode via localhost:8080/data');
-    } else {
-      // Node.js environment fallback
-      this.baseUrl = basePath;
-      console.log('DataLoader: Using direct file access');
-    }
+  constructor(serverUrl: string = 'http://localhost:8081') {
+    this.serverUrl = serverUrl;
   }
 
-  setBasePath(path: string) {
-    this.basePath = path;
-    if (this.isHttpMode) {
-      this.baseUrl = 'http://localhost:8081/data';
-    } else {
-      this.baseUrl = path;
-    }
+  setBasePath(serverUrl: string) {
+    this.serverUrl = serverUrl;
   }
 
-  /**
-   * Parse CSV content into array of objects with better error handling
-   */
-  private parseCSV(content: string): any[] {
+  async loadSession(): Promise<SessionData> {
     try {
-      const lines = content.split('\n').filter(line => line.trim());
-      if (lines.length === 0) {
-        console.warn('CSV file is empty');
+      console.log('Loading session data from server API...');
+
+      // Get dashboard summary first to understand the data structure
+      const dashboardResponse = await fetch(`${this.serverUrl}/api/dashboard`);
+      if (!dashboardResponse.ok) {
+        throw new Error(`Dashboard API failed: ${dashboardResponse.statusText}`);
+      }
+      const dashboardData = await dashboardResponse.json();
+      console.log('Dashboard data:', dashboardData);
+
+      // Load GPS data from F2/gps_log.csv
+      const gpsData = await this.loadGPSData();
+      console.log('GPS data loaded:', gpsData.length, 'points');
+
+      // Load system metrics from floMobility123_F1/system_metrics.csv
+      const systemMetrics = await this.loadSystemMetrics();
+      console.log('System metrics loaded:', systemMetrics.length, 'records');
+
+      // Scan for all metadata files
+      const metadataFiles = await this.loadMetadataFiles();
+      console.log('Metadata files found:', metadataFiles);
+
+      // Build camera information
+      const cameras = await this.buildCameraInfo(metadataFiles, dashboardData);
+      console.log('Cameras configured:', cameras);
+
+      // Create timeline by combining GPS data with detection metadata
+      const timeline = await this.createTimeline(gpsData, metadataFiles);
+      console.log('Timeline created:', timeline.length, 'frames');
+
+      const sessionData: SessionData = {
+        sessionName: this.extractSessionName(),
+        sessionPath: this.serverUrl,
+        cameras,
+        timeline,
+        gpsData,
+        systemMetrics
+      };
+
+      return sessionData;
+    } catch (error) {
+      console.error('Failed to load session data:', error);
+      throw error;
+    }
+  }
+
+  private async loadGPSData(): Promise<GPSData[]> {
+    try {
+      const response = await fetch(`${this.serverUrl}/api/gps-data`);
+      if (!response.ok) {
+        console.warn('GPS data not available:', response.statusText);
+        return [];
+      }
+      
+      const result = await response.json();
+      if (!result.success || !result.data) {
+        console.warn('GPS data response invalid:', result);
         return [];
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-      console.log('CSV headers found:', headers);
-
-      return lines.slice(1).map((line, index) => {
-        try {
-          // Handle CSV parsing with quotes and commas
-          const values = this.parseCSVLine(line);
-          const row: any = {};
-          headers.forEach((header, headerIndex) => {
-            row[header] = values[headerIndex] || '';
-          });
-          return row;
-        } catch (error) {
-          console.warn(`Error parsing CSV line ${index + 2}:`, error);
-          return null;
-        }
-      }).filter(row => row !== null);
+      return result.data.map((row: any) => ({
+        timestamp: row.timestamp || `${row.date} ${row.time}`,
+        time: row.time || '00:00:00',
+        date: row.date || new Date().toISOString().split('T')[0],
+        latitude: parseFloat(row.latitude || row.lat || 0),
+        longitude: parseFloat(row.longitude || row.lng || row.lon || 0),
+        altitude: row.altitude ? parseFloat(row.altitude) : undefined,
+        speed: row.speed ? parseFloat(row.speed) : undefined,
+        heading: row.heading ? parseFloat(row.heading) : undefined
+      }));
     } catch (error) {
-      console.error('Error parsing CSV:', error);
+      console.error('Error loading GPS data:', error);
       return [];
     }
   }
 
-  /**
-   * Parse a single CSV line handling quotes and escaped commas
-   */
-  private parseCSVLine(line: string): string[] {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const nextChar = line[i + 1];
-      
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          current += '"';
-          i++; // Skip next quote
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    
-    result.push(current.trim());
-    return result;
-  }
-
-  /**
-   * Enhanced fetch with better error handling and timeout
-   */
-  private async safeFetch(url: string, timeout: number = 10000): Promise<string | null> {
+  private async loadSystemMetrics(): Promise<SystemMetrics[]> {
     try {
-      console.log(`Attempting to fetch: ${url}`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'text/plain,text/csv,application/csv,*/*',
-          'Cache-Control': 'no-cache',
-        },
-      });
-
-      clearTimeout(timeoutId);
-
+      const response = await fetch(`${this.serverUrl}/api/system-metrics`);
       if (!response.ok) {
-        console.warn(`HTTP ${response.status} for ${url}: ${response.statusText}`);
-        if (response.status === 404) {
-          console.log(`File not found: ${url}`);
-        }
-        return null;
+        console.warn('System metrics not available:', response.statusText);
+        return [];
       }
 
-      const content = await response.text();
-      console.log(`Successfully fetched ${url} (${content.length} characters)`);
-      return content;
-    } catch (error) {
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          console.error(`Request timeout for ${url}`);
-        } else if (error.message.includes('CORS')) {
-          console.error(`CORS error for ${url}. Make sure your HTTP server has CORS enabled.`);
-        } else if (error.message.includes('Failed to fetch')) {
-          console.error(`Network error for ${url}. Make sure your HTTP server is running on localhost:8080`);
-        } else {
-          console.error(`Failed to fetch ${url}:`, error.message);
-        }
-      } else {
-        console.error(`Failed to fetch ${url}:`, error);
+      const result = await response.json();
+      if (!result.success || !result.data) {
+        console.warn('System metrics response invalid:', result);
+        return [];
       }
-      return null;
+
+      return result.data.map((row: any) => ({
+        timestamp: row.timestamp || `${row.date} ${row.time}`,
+        time: row.time || '00:00:00',
+        date: row.date || new Date().toISOString().split('T')[0],
+        cpu_usage_percent: parseFloat(row.cpu_usage_percent || 0),
+        gpu_usage_percent: parseFloat(row.gpu_usage_percent || 0),
+        memory_usage_percent: parseFloat(row.memory_usage_percent || 0),
+        memory_used_mb: parseFloat(row.memory_used_mb || 0),
+        memory_total_mb: parseFloat(row.memory_total_mb || 8192),
+        swap_usage_percent: parseFloat(row.swap_usage_percent || 0),
+        swap_used_mb: parseFloat(row.swap_used_mb || 0),
+        swap_total_mb: parseFloat(row.swap_total_mb || 2048),
+        disk_usage_percent: parseFloat(row.disk_usage_percent || 0),
+        disk_used_gb: parseFloat(row.disk_used_gb || 0),
+        disk_total_gb: parseFloat(row.disk_total_gb || 500),
+        cpu_temp_celsius: parseFloat(row.cpu_temp_celsius || 45),
+        gpu_temp_celsius: parseFloat(row.gpu_temp_celsius || 50),
+        thermal_temp_celsius: parseFloat(row.thermal_temp_celsius || 48),
+        fan_speed_percent: parseFloat(row.fan_speed_percent || 30),
+        power_total_watts: parseFloat(row.power_total_watts || 15),
+        power_cpu_watts: parseFloat(row.power_cpu_watts || 8),
+        power_gpu_watts: parseFloat(row.power_gpu_watts || 7),
+        uptime_seconds: parseFloat(row.uptime_seconds || 3600)
+      }));
+    } catch (error) {
+      console.error('Error loading system metrics:', error);
+      return [];
     }
   }
 
-  /**
-   * Test connection to HTTP server
-   */
-  async testConnection(): Promise<boolean> {
+  private async loadMetadataFiles(): Promise<any[]> {
     try {
-      const response = await fetch(this.baseUrl.replace('/data', '/health'), {
-        method: 'GET',
-        mode: 'cors',
-      });
-      return response.ok;
+      const response = await fetch(`${this.serverUrl}/api/metadata/scan`);
+      if (!response.ok) {
+        throw new Error(`Metadata scan failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      if (!result.success || !result.files) {
+        throw new Error('Metadata scan response invalid');
+      }
+
+      return result.files;
     } catch (error) {
-      console.error('HTTP server connection test failed:', error);
-      return false;
+      console.error('Error scanning metadata files:', error);
+      throw error;
     }
   }
 
-  /**
-   * Load detection data from a camera's metadata.csv file
-   */
-  async loadDetectionData(cameraName: string, className: string): Promise<DetectionData[]> {
-    const paths = [
-      `${this.baseUrl}/floMobility123_F1/${cameraName}/${className}/metadata.csv`,
-      `${this.baseUrl}/F2/${cameraName}/${className}/metadata.csv`
-    ];
+  private async buildCameraInfo(metadataFiles: any[], dashboardData: any): Promise<CameraInfo[]> {
+    const cameraMap = new Map<string, CameraInfo>();
 
-    for (const url of paths) {
-      const content = await this.safeFetch(url);
-      if (content) {
-        const csvData = this.parseCSV(content);
-        console.log(`Loaded ${csvData.length} detections from ${cameraName}/${className}`);
-        
-        return csvData.map(row => ({
-          timestamp: row.timestamp || '',
-          date: row.date || '',
-          time: row.time || '',
-          streamId: parseInt(row.stream_id) || 0,
-          frameNum: parseInt(row.frame_num) || 0,
-          objId: row.obj_id || '',
-          classId: parseInt(row.class_id) || 0,
-          className: row.class_name || className,
-          left: parseFloat(row.left) || 0,
-          top: parseFloat(row.top) || 0,
-          width: parseFloat(row.width) || 0,
-          height: parseFloat(row.height) || 0,
-          confidence: parseFloat(row.confidence) || 0,
-          latitude: row.latitude ? parseFloat(row.latitude) : undefined,
-          longitude: row.longitude ? parseFloat(row.longitude) : undefined
-        }));
-      }
-    }
-    
-    console.log(`No detection data found for ${cameraName}/${className}`);
-    return [];
-  }
-
-  /**
-   * Load GPS data from F2/gps_log.csv
-   */
-  async loadGPSData(): Promise<GPSData[]> {
-    const url = `${this.baseUrl}/F2/gps_log.csv`;
-    const content = await this.safeFetch(url);
-    
-    if (!content) {
-      console.log('No GPS data file found, creating mock GPS data');
-      return this.createMockGPSData();
-    }
-
-    const csvData = this.parseCSV(content);
-    console.log(`Loaded ${csvData.length} GPS points`);
-
-    return csvData.map(row => ({
-      timestamp: row.timestamp || '',
-      date: row.date || '',
-      time: row.time || '',
-      latitude: parseFloat(row.latitude) || 0,
-      longitude: parseFloat(row.longitude) || 0,
-      altitude: row.altitude ? parseFloat(row.altitude) : undefined,
-      speed_knots: row.speed_knots ? parseFloat(row.speed_knots) : undefined,
-      fix_quality: row.fix_quality ? parseInt(row.fix_quality) : undefined,
-      satellites_used: row.satellites_used ? parseInt(row.satellites_used) : undefined,
-      hdop: row.hdop ? parseFloat(row.hdop) : undefined,
-      gps_timestamp: row.gps_timestamp || undefined
-    }));
-  }
-
-  /**
-   * Create mock GPS data when GPS file is not available
-   */
-  private createMockGPSData(): GPSData[] {
-    const baseTime = new Date('2025-01-01T01:10:47.835Z');
-    const mockData: GPSData[] = [];
-    
-    // Yokosuka, Kanagawa, JP coordinates
-    const baseLat = 35.433;
-    const baseLng = 139.328;
-    
-    for (let i = 0; i < 100; i++) {
-      const timestamp = new Date(baseTime.getTime() + i * 1000);
-      const lat = baseLat + (Math.random() - 0.5) * 0.01;
-      const lng = baseLng + (Math.random() - 0.5) * 0.01;
+    // Initialize cameras from metadata files
+    metadataFiles.forEach(file => {
+      const cameraName = file.camera;
       
-      mockData.push({
-        timestamp: timestamp.toISOString().replace('T', ' ').slice(0, -1),
-        date: timestamp.toISOString().slice(0, 10),
-        time: timestamp.toISOString().slice(11, -1),
-        latitude: lat,
-        longitude: lng,
-        altitude: 50 + Math.random() * 20,
-        speed_knots: Math.random() * 10,
-        fix_quality: 1,
-        satellites_used: 8 + Math.floor(Math.random() * 4),
-        hdop: 1.0 + Math.random() * 2.0,
-      });
-    }
-    
-    console.log(`Created ${mockData.length} mock GPS points`);
-    return mockData;
-  }
-
-  /**
-   * Load system metrics from floMobility123_F1/system_metrics.csv
-   */
-  async loadSystemMetrics(): Promise<SystemMetrics[]> {
-    const url = `${this.baseUrl}/floMobility123_F1/system_metrics.csv`;
-    const content = await this.safeFetch(url);
-    
-    if (!content) {
-      console.log('No system metrics file found, creating mock data');
-      return this.createMockSystemMetrics();
-    }
-
-    const csvData = this.parseCSV(content);
-    console.log(`Loaded ${csvData.length} system metrics`);
-
-    return csvData.map(row => ({
-      timestamp: row.timestamp || '',
-      date: row.date || '',
-      time: row.time || '',
-      cpu_usage_percent: parseFloat(row.cpu_usage_percent) || 0,
-      gpu_usage_percent: parseFloat(row.gpu_usage_percent) || 0,
-      memory_used_mb: parseFloat(row.memory_used_mb) || 0,
-      memory_total_mb: parseFloat(row.memory_total_mb) || 16000,
-      memory_usage_percent: parseFloat(row.memory_usage_percent) || 0,
-      swap_used_mb: parseFloat(row.swap_used_mb) || 0,
-      swap_total_mb: parseFloat(row.swap_total_mb) || 4000,
-      swap_usage_percent: parseFloat(row.swap_usage_percent) || 0,
-      disk_used_gb: parseFloat(row.disk_used_gb) || 100,
-      disk_total_gb: parseFloat(row.disk_total_gb) || 500,
-      disk_usage_percent: parseFloat(row.disk_usage_percent) || 20,
-      cpu_temp_celsius: parseFloat(row.cpu_temp_celsius) || 45,
-      gpu_temp_celsius: parseFloat(row.gpu_temp_celsius) || 50,
-      thermal_temp_celsius: parseFloat(row.thermal_temp_celsius) || 47,
-      power_total_watts: parseFloat(row.power_total_watts) || 15,
-      power_cpu_watts: parseFloat(row.power_cpu_watts) || 8,
-      power_gpu_watts: parseFloat(row.power_gpu_watts) || 7,
-      fan_speed_percent: parseFloat(row.fan_speed_percent) || 30,
-      uptime_seconds: parseFloat(row.uptime_seconds) || 86400
-    }));
-  }
-
-  /**
-   * Create mock system metrics when file is not available
-   */
-  private createMockSystemMetrics(): SystemMetrics[] {
-    const baseTime = new Date('2025-01-01T01:10:47.835Z');
-    const mockData: SystemMetrics[] = [];
-    
-    for (let i = 0; i < 20; i++) {
-      const timestamp = new Date(baseTime.getTime() + i * 60000);
-      
-      mockData.push({
-        timestamp: timestamp.toISOString().replace('T', ' ').slice(0, -1),
-        date: timestamp.toISOString().slice(0, 10),
-        time: timestamp.toISOString().slice(11, -1),
-        cpu_usage_percent: 30 + Math.random() * 40,
-        gpu_usage_percent: 20 + Math.random() * 60,
-        memory_used_mb: 8000 + Math.random() * 4000,
-        memory_total_mb: 16000,
-        memory_usage_percent: 50 + Math.random() * 25,
-        swap_used_mb: Math.random() * 1000,
-        swap_total_mb: 4000,
-        swap_usage_percent: Math.random() * 25,
-        disk_used_gb: 100 + Math.random() * 50,
-        disk_total_gb: 500,
-        disk_usage_percent: 20 + Math.random() * 10,
-        cpu_temp_celsius: 40 + Math.random() * 20,
-        gpu_temp_celsius: 45 + Math.random() * 25,
-        thermal_temp_celsius: 42 + Math.random() * 18,
-        power_total_watts: 10 + Math.random() * 10,
-        power_cpu_watts: 5 + Math.random() * 5,
-        power_gpu_watts: 4 + Math.random() * 6,
-        fan_speed_percent: 20 + Math.random() * 40,
-        uptime_seconds: 86400 + i * 60
-      });
-    }
-    
-    console.log(`Created ${mockData.length} mock system metrics`);
-    return mockData;
-  }
-
-  /**
-   * Scan directory structure to find available cameras and classes
-   */
-  async scanCameras(): Promise<CameraData[]> {
-    const cameras: CameraData[] = [];
-    
-    // Test connection first
-    const isConnected = await this.testConnection();
-    if (!isConnected) {
-      console.warn('HTTP server not accessible, using mock data');
-      return this.createMockCameras();
-    }
-    
-    // Define expected camera structure
-    const expectedCameras = [
-      { name: 'argus0', type: 'argus' as const },
-      { name: 'argus2', type: 'argus' as const },
-      { name: 'cam1', type: 'cam' as const },
-      { name: '4kcam', type: '4kcam' as const }
-    ];
-
-    for (const camera of expectedCameras) {
-      const classes: string[] = [];
-      let imageCount = 0;
-      let detectionCount = 0;
-
-      // Check floMobility123_F1 structure
-      const f1Classes = ['crack', 'pole', 'pothole', 'crosswalk_blur'];
-      for (const className of f1Classes) {
-        const detections = await this.loadDetectionData(camera.name, className);
-        if (detections.length > 0) {
-          classes.push(className);
-          detectionCount += detections.length;
-          imageCount += detections.length;
-        }
-      }
-
-      // Check F2 structure
-      const f2Classes = camera.name === 'cam1' ? ['white_line_blur'] : 
-                       camera.name === '4kcam' ? ['pole'] : [];
-      
-      for (const className of f2Classes) {
-        const detections = await this.loadDetectionData(camera.name, className);
-        if (detections.length > 0) {
-          classes.push(className);
-          detectionCount += detections.length;
-          imageCount += detections.length;
-        }
-      }
-
-      // Only add camera if it has data or if we want to show empty cameras
-      if (classes.length > 0) {
-        cameras.push({
-          name: camera.name,
-          type: camera.type,
-          classes,
-          imageCount,
-          detectionCount
+      if (!cameraMap.has(cameraName)) {
+        const cameraConfig = this.getCameraConfig(cameraName);
+        cameraMap.set(cameraName, {
+          name: cameraName,
+          displayName: cameraConfig.displayName,
+          type: cameraConfig.type,
+          resolution: cameraConfig.resolution,
+          color: cameraConfig.color,
+          description: cameraConfig.description,
+          detectionCount: 0,
+          classes: []
         });
       }
+
+      const camera = cameraMap.get(cameraName)!;
+      if (!camera.classes.includes(file.anomalyType)) {
+        camera.classes.push(file.anomalyType);
+      }
+    });
+
+    // Update detection counts from dashboard data if available
+    if (dashboardData.summary?.anomalies) {
+      Object.entries(dashboardData.summary.anomalies).forEach(([cameraName, anomalies]: [string, any]) => {
+        const camera = cameraMap.get(cameraName);
+        if (camera && anomalies) {
+          camera.detectionCount = Object.values(anomalies).reduce((sum: number, anomaly: any) => {
+            return sum + (anomaly.recordCount || 0);
+          }, 0);
+        }
+      });
     }
 
-    console.log(`Found ${cameras.length} cameras:`, cameras.map(c => c.name));
-    return cameras.length > 0 ? cameras : this.createMockCameras();
+    return Array.from(cameraMap.values());
   }
 
-  /**
-   * Create mock camera data for testing
-   */
-  private createMockCameras(): CameraData[] {
-    return [
-      {
-        name: 'argus2',
-        type: 'argus',
-        classes: ['pole'],
-        imageCount: 10,
-        detectionCount: 10
-      }
-    ];
-  }
-
-  /**
-   * Create timeline data by merging detections with GPS data
-   */
-  async createTimeline(cameras: CameraData[]): Promise<ImageData[]> {
+  private async createTimeline(gpsData: GPSData[], metadataFiles: any[]): Promise<ImageData[]> {
     const timeline: ImageData[] = [];
-    const timelineMap: { [timestamp: string]: ImageData } = {};
 
-    // Load GPS data first
-    const gpsData = await this.loadGPSData();
-    console.log(`Loaded ${gpsData.length} GPS points for timeline`);
+    // For each GPS point, create a timeline entry
+    for (const gpsPoint of gpsData) {
+      const timelineEntry: ImageData = {
+        timestamp: gpsPoint.timestamp,
+        date: gpsPoint.date,
+        time: gpsPoint.time,
+        latitude: gpsPoint.latitude,
+        longitude: gpsPoint.longitude,
+        detections: [],
+        images: {},
+        fullPaths: {}
+      };
 
-    // If no real detection data, create mock timeline
-    let hasRealDetections = false;
-    
-    // Load all detections and group by timestamp
-    for (const camera of cameras) {
-      for (const className of camera.classes) {
-        const detections = await this.loadDetectionData(camera.name, className);
-        
-        if (detections.length > 0) {
-          hasRealDetections = true;
+      // Load detection data for each camera/class combination
+      for (const metadataFile of metadataFiles) {
+        try {
+          const detectionData = await this.loadDetectionMetadata(
+            metadataFile.session,
+            metadataFile.camera,
+            metadataFile.anomalyType
+          );
+
+          // Find detections that match this timestamp (approximately)
+          const matchingDetections = this.findMatchingDetections(detectionData, gpsPoint.timestamp);
           
-          for (const detection of detections) {
-            const timestamp = detection.timestamp;
-            
-            if (!timelineMap[timestamp]) {
-              // Find corresponding GPS data
-              const gps = gpsData.find(g => g.timestamp === timestamp) || gpsData[0] || {
-                latitude: 35.433, longitude: 139.328, timestamp, date: detection.date, time: detection.time
-              };
-              
-              timelineMap[timestamp] = {
-                timestamp,
-                date: detection.date,
-                time: detection.time,
-                latitude: gps.latitude,
-                longitude: gps.longitude,
-                detections: [],
-                images: {},
-                fullPaths: {}
-              };
+          if (matchingDetections.length > 0) {
+            // Add detections to timeline
+            timelineEntry.detections.push(...matchingDetections);
+
+            // Initialize camera images structure
+            if (!timelineEntry.images[metadataFile.camera]) {
+              timelineEntry.images[metadataFile.camera] = {};
+              timelineEntry.fullPaths[metadataFile.camera] = {};
             }
 
-            timelineMap[timestamp].detections.push(detection);
-
-            // Initialize camera structure
-            if (!timelineMap[timestamp].images[camera.name]) {
-              timelineMap[timestamp].images[camera.name] = {};
-              timelineMap[timestamp].fullPaths[camera.name] = {};
-            }
-            if (!timelineMap[timestamp].images[camera.name][className]) {
-              timelineMap[timestamp].images[camera.name][className] = [];
-              timelineMap[timestamp].fullPaths[camera.name][className] = [];
+            if (!timelineEntry.images[metadataFile.camera][metadataFile.anomalyType]) {
+              timelineEntry.images[metadataFile.camera][metadataFile.anomalyType] = [];
+              timelineEntry.fullPaths[metadataFile.camera][metadataFile.anomalyType] = [];
             }
 
-            // Generate image paths (using HTTP server paths)
-            const fileTimestamp = timestamp.replace(' ', '_').replace(/:/g, '-');
-            const frameNum = detection.frameNum;
-            const objId = detection.objId;
-            
-            const isF2 = (camera.name === 'cam1' && className === 'white_line_blur') ||
-                        (camera.name === '4kcam' && className === 'pole');
-            
-            const extension = camera.name === '4kcam' ? 'png' : 'jpg';
-            const imageFilename = `${fileTimestamp}_${frameNum}_${objId}.${extension}`;
-            
-            const basePath = isF2 ? 'F2' : 'floMobility123_F1';
-            const fullPath = `${this.baseUrl}/${basePath}/${camera.name}/${className}/images/${imageFilename}`;
-
-            timelineMap[timestamp].images[camera.name][className].push(imageFilename);
-            timelineMap[timestamp].fullPaths[camera.name][className].push(fullPath);
+            // Add image paths for these detections
+            matchingDetections.forEach(detection => {
+              if (detection.imagePath) {
+                const fullPath = `${this.serverUrl}/data/${metadataFile.session}/${metadataFile.camera}/${metadataFile.anomalyType}/${detection.imagePath}`;
+                timelineEntry.images[metadataFile.camera][metadataFile.anomalyType].push(detection.imagePath);
+                timelineEntry.fullPaths[metadataFile.camera][metadataFile.anomalyType].push(fullPath);
+              }
+            });
+          }
+        } catch (error) {
+          if (error instanceof Error) {
+            console.warn(`Failed to load metadata for ${metadataFile.camera}/${metadataFile.anomalyType}:`, error.message);
+          } else {
+            console.warn(`Failed to load metadata for ${metadataFile.camera}/${metadataFile.anomalyType}:`, error);
           }
         }
       }
+
+      timeline.push(timelineEntry);
     }
 
-    // If no real detections found, create mock timeline from GPS data
-    if (!hasRealDetections && gpsData.length > 0) {
-      console.log('No real detections found, creating mock timeline');
-      
-      for (let i = 0; i < Math.min(gpsData.length, 20); i++) {
-        const gps = gpsData[i];
-        const mockDetection: DetectionData = {
-          timestamp: gps.timestamp,
-          date: gps.date,
-          time: gps.time,
-          streamId: 0,
-          frameNum: i,
-          objId: `mock_${i}`,
-          classId: 5,
-          className: 'pole',
-          left: 100 + Math.random() * 200,
-          top: 100 + Math.random() * 200,
-          width: 50 + Math.random() * 100,
-          height: 100 + Math.random() * 200,
-          confidence: 0.7 + Math.random() * 0.3,
-          latitude: gps.latitude,
-          longitude: gps.longitude
-        };
-
-        timelineMap[gps.timestamp] = {
-          timestamp: gps.timestamp,
-          date: gps.date,
-          time: gps.time,
-          latitude: gps.latitude,
-          longitude: gps.longitude,
-          detections: [mockDetection],
-          images: {
-            'argus2': {
-              'pole': [`mock_pole_${i}.jpg`]
-            }
-          },
-          fullPaths: {
-            'argus2': {
-              'pole': [`${this.baseUrl}/mock/images/pole_${i}.jpg`]
-            }
-          }
-        };
-      }
-    }
-
-    // Convert to array and sort by timestamp
-    timeline.push(...Object.values(timelineMap));
-    timeline.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-    console.log(`Created timeline with ${timeline.length} data points`);
     return timeline;
   }
 
-  /**
-   * Load complete session data
-   */
-  async loadSession(): Promise<SessionData> {
-    console.log(`Loading session data from: ${this.baseUrl}`);
-    
-    const sessionName = this.basePath.split('/').pop() || 'Session';
-    
+  private async loadDetectionMetadata(session: string, camera: string, anomalyType: string): Promise<any[]> {
     try {
-      // Load all data with error handling
-      const [cameras, gpsData, systemMetrics] = await Promise.allSettled([
-        this.scanCameras(),
-        this.loadGPSData(),
-        this.loadSystemMetrics()
-      ]);
+      const response = await fetch(`${this.serverUrl}/api/metadata/${session}/${camera}/${anomalyType}`);
+      if (!response.ok) {
+        throw new Error(`Metadata API failed: ${response.statusText}`);
+      }
 
-      const camerasResult = cameras.status === 'fulfilled' ? cameras.value : [];
-      const gpsResult = gpsData.status === 'fulfilled' ? gpsData.value : [];
-      const metricsResult = systemMetrics.status === 'fulfilled' ? systemMetrics.value : [];
+      const result = await response.json();
+      if (!result.success || !result.data) {
+        throw new Error('Invalid metadata response');
+      }
 
-      console.log(`Session loaded: ${camerasResult.length} cameras, ${gpsResult.length} GPS points, ${metricsResult.length} metrics`);
-
-      // Create timeline
-      const timeline = await this.createTimeline(camerasResult);
-
-      return {
-        sessionPath: this.basePath,
-        sessionName,
-        cameras: camerasResult,
-        gpsData: gpsResult,
-        systemMetrics: metricsResult,
-        timeline
-      };
+      // Convert metadata CSV data to detection format
+      return result.data.map((row: any) => ({
+        frameNum: parseInt(row.frameNum || row.frame_number || 0),
+        streamId: parseInt(row.streamId || row.stream_id || (camera === '4kcam' ? 100 : 1)),
+        className: anomalyType,
+        confidence: parseFloat(row.confidence || row.score || 1.0),
+        left: parseFloat(row.left || row.x || row.bbox_left || 0),
+        top: parseFloat(row.top || row.y || row.bbox_top || 0),
+        width: parseFloat(row.width || row.w || row.bbox_width || 100),
+        height: parseFloat(row.height || row.h || row.bbox_height || 100),
+        timestamp: row.timestamp || row.time || '',
+        imagePath: row.imagePath || row.image_path || row.filename || `frame_${row.frameNum || 0}.jpg`
+      }));
     } catch (error) {
-      console.error('Error loading session:', error);
-      throw new Error(`Failed to load session: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`Error loading detection metadata for ${camera}/${anomalyType}:`, error);
+      return [];
     }
+  }
+
+  private findMatchingDetections(detections: any[], targetTimestamp: string): any[] {
+    // Simple time-based matching - you may want to improve this based on your data structure
+    const targetTime = new Date(targetTimestamp).getTime();
+    const timeThreshold = 5000; // 5 seconds tolerance
+
+    return detections.filter(detection => {
+      if (!detection.timestamp) return false;
+      
+      const detectionTime = new Date(detection.timestamp).getTime();
+      return Math.abs(detectionTime - targetTime) <= timeThreshold;
+    });
+  }
+
+  private getCameraConfig(cameraName: string) {
+    const configs = {
+      '4kcam': {
+        displayName: '4K Camera',
+        type: 'High Resolution',
+        resolution: '4096x2160',
+        color: '#3B82F6',
+        description: 'High-resolution 4K road inspection camera'
+      },
+      'cam1': {
+        displayName: 'Camera 1',
+        type: 'Standard',
+        resolution: '1920x1080',
+        color: '#10B981',
+        description: 'Standard resolution road inspection camera'
+      },
+      'argus0': {
+        displayName: 'Argus Camera 0',
+        type: 'Multi-sensor',
+        resolution: '1920x1080',
+        color: '#F59E0B',
+        description: 'Multi-sensor inspection camera'
+      },
+      'argus1': {
+        displayName: 'Argus Camera 1',
+        type: 'Multi-sensor',
+        resolution: '1920x1080',
+        color: '#EF4444',
+        description: 'Multi-sensor inspection camera'
+      }
+    };
+
+    return configs[cameraName as keyof typeof configs] || {
+      displayName: cameraName,
+      type: 'Unknown',
+      resolution: '1920x1080',
+      color: '#6B7280',
+      description: 'Road inspection camera'
+    };
+  }
+
+  private extractSessionName(): string {
+    const url = new URL(this.serverUrl);
+    return url.hostname === 'localhost' ? '01-01-70-01-10-47-835' : 'Remote Session';
   }
 }

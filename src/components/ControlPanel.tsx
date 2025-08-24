@@ -1,4 +1,4 @@
-// components/ControlPanel.tsx
+// components/ControlPanel.tsx - Updated for server API integration
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,9 +17,54 @@ import {
   Camera,
   MapPin,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Server,
+  Wifi,
+  Database
 } from 'lucide-react';
-import { SessionData, ImageData, CAMERA_CONFIGS } from '../types';
+
+interface DetectionData {
+  frameNum: number;
+  streamId: number;
+  className: string;
+  confidence: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  timestamp?: string;
+}
+
+interface ImageData {
+  timestamp: string;
+  date: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  detections: DetectionData[];
+  images: { [cameraName: string]: { [className: string]: string[] } };
+  fullPaths: { [cameraName: string]: { [className: string]: string[] } };
+}
+
+interface CameraInfo {
+  name: string;
+  displayName: string;
+  type: string;
+  resolution: string;
+  color: string;
+  description?: string;
+  detectionCount: number;
+  classes: string[];
+}
+
+interface SessionData {
+  sessionName: string;
+  sessionPath: string;
+  cameras: CameraInfo[];
+  timeline: ImageData[];
+  gpsData: any[];
+  systemMetrics: any[];
+}
 
 interface ControlPanelProps {
   sessionData: SessionData;
@@ -29,10 +74,34 @@ interface ControlPanelProps {
   onIndexChange: (index: number) => void;
   onPlayPause: () => void;
   onSpeedChange: (speed: number) => void;
-  onLoadSession: (path: string) => void;
+  onLoadSession: (url: string) => void;
   onRefresh: () => void;
+  serverUrl: string;
   className?: string;
 }
+
+const CAMERA_CONFIGS = [
+  {
+    name: '4kcam',
+    displayName: '4K Camera',
+    color: '#3B82F6'
+  },
+  {
+    name: 'cam1',
+    displayName: 'Camera 1',
+    color: '#10B981'
+  },
+  {
+    name: 'argus0',
+    displayName: 'Argus Camera 0',
+    color: '#F59E0B'
+  },
+  {
+    name: 'argus1',
+    displayName: 'Argus Camera 1',
+    color: '#EF4444'
+  }
+];
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   sessionData,
@@ -44,18 +113,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onSpeedChange,
   onLoadSession,
   onRefresh,
+  serverUrl,
   className = ''
 }) => {
-  const [customPath, setCustomPath] = useState(sessionData.sessionPath);
+  const [customUrl, setCustomUrl] = useState(serverUrl);
   const [jumpToTime, setJumpToTime] = useState('');
 
   const currentData = sessionData.timeline[currentIndex];
   const totalFrames = sessionData.timeline.length;
 
-  // Update custom path when session changes
+  // Update custom URL when server changes
   useEffect(() => {
-    setCustomPath(sessionData.sessionPath);
-  }, [sessionData.sessionPath]);
+    setCustomUrl(serverUrl);
+  }, [serverUrl]);
 
   const handlePrevious = () => {
     onIndexChange(Math.max(0, currentIndex - 1));
@@ -119,13 +189,48 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   return (
     <div className={`space-y-4 ${className}`}>
+      {/* Server Connection Info */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-center">
+            <CardTitle className="flex items-center gap-2">
+              <Server className="w-5 h-5" />
+              Server Connection
+            </CardTitle>
+            <Badge variant="outline" className="text-green-600">
+              <Wifi className="w-3 h-3 mr-1" />
+              Connected
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Server URL:</span>
+              <code className="text-xs bg-gray-100 px-2 py-1 rounded">{serverUrl}</code>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Session:</span>
+              <span className="font-medium">{sessionData.sessionName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">API Health:</span>
+              <Badge variant="outline" className="text-xs">
+                <Database className="w-3 h-3 mr-1" />
+                Active
+              </Badge>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Session Info */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
             <CardTitle className="flex items-center gap-2">
               <FolderOpen className="w-5 h-5" />
-              Session: {sessionData.sessionName}
+              Data Summary
             </CardTitle>
             <Button variant="outline" size="sm" onClick={onRefresh}>
               <RefreshCw className="w-4 h-4 mr-2" />
@@ -134,42 +239,50 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="grid grid-cols-1 gap-4 text-sm">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-blue-500" />
-              <div>
-                <div className="font-medium">{sessionData.cameras.length} Cameras</div>
-                <div className="text-xs text-gray-600">
-                  {sessionData.cameras.map(c => c.name).join(', ')}
+              <div className="flex-1">
+                <div className="font-medium">{sessionData.cameras.length} Cameras Active</div>
+                <div className="text-xs text-gray-600 flex flex-wrap gap-1 mt-1">
+                  {sessionData.cameras.map(c => (
+                    <Badge key={c.name} variant="outline" className="text-xs">
+                      {c.name}
+                    </Badge>
+                  ))}
                 </div>
               </div>
             </div>
+            
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-green-500" />
-              <div>
-                <div className="font-medium">{stats.totalDetections} Detections</div>
+              <div className="flex-1">
+                <div className="font-medium">{stats.totalDetections} Total Detections</div>
                 <div className="text-xs text-gray-600">
-                  {stats.uniqueClasses.length} classes
+                  {stats.uniqueClasses.length} unique classes: {stats.uniqueClasses.slice(0, 3).join(', ')}
+                  {stats.uniqueClasses.length > 3 && '...'}
                 </div>
               </div>
             </div>
+            
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-red-500" />
-              <div>
+              <div className="flex-1">
                 <div className="font-medium">{sessionData.gpsData.length} GPS Points</div>
                 <div className="text-xs text-gray-600">
                   {totalFrames} timeline frames
                 </div>
               </div>
             </div>
+            
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-purple-500" />
-              <div>
+              <div className="flex-1">
                 <div className="font-medium">
-                  {Math.round(stats.duration / 1000 / 60)} mins
+                  {Math.round(stats.duration / 1000 / 60)} minutes duration
                 </div>
                 <div className="text-xs text-gray-600">
-                  {sessionData.systemMetrics.length} metrics
+                  {sessionData.systemMetrics.length} system metrics
                 </div>
               </div>
             </div>
@@ -295,11 +408,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   <Badge variant="secondary">{currentData.detections.length}</Badge>
                   {currentData.detections.length > 0 && (
                     <div className="flex gap-1">
-                      {[...new Set(currentData.detections.map(d => d.className))].map(className => (
+                      {[...new Set(currentData.detections.map(d => d.className))].slice(0, 3).map(className => (
                         <Badge key={className} variant="outline" className="text-xs">
                           {className.replace('_', ' ')}
                         </Badge>
                       ))}
+                      {[...new Set(currentData.detections.map(d => d.className))].length > 3 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{[...new Set(currentData.detections.map(d => d.className))].length - 3}
+                        </Badge>
+                      )}
                     </div>
                   )}
                 </div>
@@ -317,7 +435,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         className="text-xs"
                         style={{ borderColor: config?.color }}
                       >
-                        {cameraName}
+                        {config?.displayName || cameraName}
                       </Badge>
                     );
                   })}
@@ -328,50 +446,50 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </Card>
       )}
 
-      {/* Session Load */}
+      {/* Server Connection */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />
-            Load Session
+            Server Connection
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2">
             <Input
               type="text"
-              value={customPath}
-              onChange={(e) => setCustomPath(e.target.value)}
-              placeholder="/path/to/session/data"
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              placeholder="http://localhost:8081"
               className="flex-1"
             />
             <Button 
-              onClick={() => onLoadSession(customPath)}
+              onClick={() => onLoadSession(customUrl)}
               size="sm"
-              disabled={!customPath.trim()}
+              disabled={!customUrl.trim()}
             >
-              Load
+              Connect
             </Button>
           </div>
           
           <div className="text-xs text-gray-500">
-            <div className="font-medium mb-1">Quick Load Options:</div>
+            <div className="font-medium mb-1">Quick Connect Options:</div>
             <div className="space-y-1">
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 px-2 text-xs w-full justify-start"
-                onClick={() => onLoadSession('/home/shanks/Music/01-01-70-01-10-47-835')}
+                onClick={() => onLoadSession('http://localhost:8081')}
               >
-                📁 Default Session (01-01-70-01-10-47-835)
+                🔗 Default Server (localhost:8081)
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 px-2 text-xs w-full justify-start"
-                onClick={() => onLoadSession('/home/shanks/Nissan-Data-Modeling/New_dataset/New_4k_data/pattern1/08-05-25-02-58-12-429')}
+                onClick={() => onLoadSession('http://localhost:8082')}
               >
-                📁 Pattern 1 Session (08-05-25-02-58-12-429)
+                🔗 Alternative Server (localhost:8082)
               </Button>
             </div>
           </div>

@@ -13,7 +13,8 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
-  Monitor
+  Monitor,
+  ServerCrash
 } from 'lucide-react';
 
 // Import our custom components
@@ -24,7 +25,43 @@ import ControlPanel from '../components/ControlPanel';
 
 // Import utilities and types
 import { DataLoader } from '../utils/dataLoader';
-import { SessionData, CAMERA_CONFIGS } from '../types';
+import { SessionData } from '../types';
+
+// Camera configurations for UI
+export const CAMERA_CONFIGS = [
+  {
+    name: '4kcam',
+    displayName: '4K Camera',
+    type: 'High Resolution',
+    resolution: '4096x2160',
+    color: '#3B82F6',
+    description: 'High-resolution 4K road inspection camera'
+  },
+  {
+    name: 'cam1',
+    displayName: 'Camera 1',
+    type: 'Standard',
+    resolution: '1920x1080',
+    color: '#10B981',
+    description: 'Standard resolution road inspection camera'
+  },
+  {
+    name: 'argus0',
+    displayName: 'Argus Camera 0',
+    type: 'Multi-sensor',
+    resolution: '1920x1080',
+    color: '#F59E0B',
+    description: 'Multi-sensor inspection camera'
+  },
+  {
+    name: 'argus1',
+    displayName: 'Argus Camera 1',
+    type: 'Multi-sensor',
+    resolution: '1920x1080',
+    color: '#EF4444',
+    description: 'Multi-sensor inspection camera'
+  }
+];
 
 export default function MultiCameraViewer() {
   // State management
@@ -34,9 +71,11 @@ export default function MultiCameraViewer() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dataLoader] = useState(() => new DataLoader('/home/shanks/Music/01-01-70-01-10-47-835'));
+  const [serverUrl, setServerUrl] = useState('http://localhost:8081');
+  const [dataLoader] = useState(() => new DataLoader(serverUrl));
   const [visibleCameras, setVisibleCameras] = useState<{[key: string]: boolean}>({});
   const [activeTab, setActiveTab] = useState('cameras');
+  const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   
   // Refs for interval management
   const playbackIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -44,10 +83,17 @@ export default function MultiCameraViewer() {
   // Current frame data
   const currentData = sessionData?.timeline[currentIndex];
 
+  // Check server health on mount
+  useEffect(() => {
+    checkServerHealth();
+  }, []);
+
   // Load initial session data
   useEffect(() => {
-    loadSessionData();
-  }, []);
+    if (serverStatus === 'connected') {
+      loadSessionData();
+    }
+  }, [serverStatus]);
 
   // Auto-play functionality
   useEffect(() => {
@@ -88,20 +134,40 @@ export default function MultiCameraViewer() {
     }
   }, [sessionData]);
 
-  const loadSessionData = async (customPath?: string) => {
+  const checkServerHealth = async () => {
+    setServerStatus('checking');
+    try {
+      const response = await fetch(`${serverUrl}/health`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Server health check:', data);
+        setServerStatus('connected');
+      } else {
+        setServerStatus('disconnected');
+        setError('Server is not responding properly');
+      }
+    } catch (error) {
+      console.error('Server health check failed:', error);
+      setServerStatus('disconnected');
+      setError('Cannot connect to surveillance server. Make sure it\'s running on http://localhost:8081');
+    }
+  };
+
+  const loadSessionData = async (customUrl?: string) => {
     setIsLoading(true);
     setError(null);
     
     try {
-      if (customPath) {
-        dataLoader.setBasePath(customPath);
+      if (customUrl) {
+        setServerUrl(customUrl);
+        dataLoader.setBasePath(customUrl);
       }
       
-      console.log('Loading session data...');
+      console.log('Loading session data from server...');
       const data = await dataLoader.loadSession();
       
       if (data.timeline.length === 0) {
-        throw new Error('No timeline data found. Please check if the session directory contains valid data.');
+        throw new Error('No timeline data found. Please check if the server has GPS data and camera metadata.');
       }
       
       setSessionData(data);
@@ -130,13 +196,16 @@ export default function MultiCameraViewer() {
     setPlaybackSpeed(speed);
   }, []);
 
-  const handleLoadSession = useCallback((path: string) => {
-    loadSessionData(path);
+  const handleLoadSession = useCallback((url: string) => {
+    loadSessionData(url);
   }, []);
 
   const handleRefresh = useCallback(() => {
-    loadSessionData();
-  }, []);
+    checkServerHealth();
+    if (serverStatus === 'connected') {
+      loadSessionData();
+    }
+  }, [serverStatus]);
 
   const toggleCameraVisibility = useCallback((cameraName: string) => {
     setVisibleCameras(prev => ({
@@ -155,14 +224,68 @@ export default function MultiCameraViewer() {
     }
   }, [sessionData]);
 
+  // Server disconnected state
+  if (serverStatus === 'disconnected') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="max-w-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <ServerCrash className="w-5 h-5" />
+              Server Connection Failed
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-700 mb-2">
+                Cannot connect to the surveillance data server.
+              </p>
+              <p className="text-sm text-red-600">
+                Make sure your server.js is running on <code className="bg-red-100 px-1 py-0.5 rounded">http://localhost:8081</code>
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="font-medium">To start the server:</h4>
+              <div className="bg-gray-100 p-3 rounded-lg text-sm font-mono">
+                <div>cd /path/to/your/server</div>
+                <div>node server.js</div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={checkServerHealth} variant="outline">
+                <Loader2 className="w-4 h-4 mr-2" />
+                Retry Connection
+              </Button>
+              <Button onClick={() => setServerUrl('http://localhost:8082')} variant="outline">
+                Try Port 8082
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Loading state
-  if (isLoading) {
+  if (isLoading || serverStatus === 'checking') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-          <h2 className="text-xl font-semibold mb-2">Loading Session Data</h2>
-          <p className="text-gray-600">Please wait while we load your multi-camera inference data...</p>
+          <h2 className="text-xl font-semibold mb-2">
+            {serverStatus === 'checking' ? 'Connecting to Server' : 'Loading Session Data'}
+          </h2>
+          <p className="text-gray-600">
+            {serverStatus === 'checking' 
+              ? 'Checking surveillance server connection...'
+              : 'Please wait while we load your multi-camera surveillance data...'
+            }
+          </p>
+          <div className="mt-4 text-sm text-gray-500">
+            Server: {serverUrl}
+          </div>
         </div>
       </div>
     );
@@ -182,7 +305,8 @@ export default function MultiCameraViewer() {
           <CardContent>
             <p className="text-gray-600 mb-4">{error}</p>
             <div className="flex gap-2">
-              <Button onClick={() => loadSessionData()} variant="outline">
+              <Button onClick={handleRefresh} variant="outline">
+                <Loader2 className="w-4 h-4 mr-2" />
                 Retry
               </Button>
               <Button onClick={() => setError(null)}>
@@ -208,10 +332,20 @@ export default function MultiCameraViewer() {
           </CardHeader>
           <CardContent>
             <p className="text-gray-600 mb-4">
-              No session data found. Please load a valid session directory.
+              No session data found. The server is connected but has no data to display.
             </p>
-            <Button onClick={() => loadSessionData()} variant="outline">
-              Try Loading Default Session
+            <div className="space-y-2">
+              <p className="text-sm text-gray-500">
+                Expected data files:
+              </p>
+              <ul className="text-sm text-gray-500 list-disc list-inside space-y-1">
+                <li>F2/gps_log.csv - GPS coordinates</li>
+                <li>floMobility123_F1/system_metrics.csv - System data</li>
+                <li>*/metadata.csv - Camera detections</li>
+              </ul>
+            </div>
+            <Button onClick={handleRefresh} variant="outline" className="mt-4">
+              Check Server Again
             </Button>
           </CardContent>
         </Card>
@@ -228,7 +362,7 @@ export default function MultiCameraViewer() {
             <div>
               <h1 className="text-2xl font-bold flex items-center gap-2">
                 <Camera className="w-6 h-6" />
-                Multi-Camera Inference Viewer
+                Surveillance Data Viewer
               </h1>
               <p className="text-gray-600 text-sm mt-1">
                 Real-time visualization of road inspection data from multiple camera sources
@@ -241,6 +375,9 @@ export default function MultiCameraViewer() {
               </Badge>
               <Badge variant="secondary" className="px-3 py-1">
                 Frame {currentIndex + 1} / {sessionData.timeline.length}
+              </Badge>
+              <Badge variant="outline" className="px-3 py-1 text-green-600">
+                Server Connected
               </Badge>
             </div>
           </div>
@@ -263,6 +400,7 @@ export default function MultiCameraViewer() {
               onSpeedChange={handleSpeedChange}
               onLoadSession={handleLoadSession}
               onRefresh={handleRefresh}
+              serverUrl={serverUrl}
             />
           </div>
 
@@ -322,6 +460,7 @@ export default function MultiCameraViewer() {
                         data={currentData}
                         isVisible={visibleCameras[camera.name] || false}
                         onToggleVisibility={() => toggleCameraVisibility(camera.name)}
+                        // serverUrl={serverUrl}
                         className="h-fit"
                       />
                     );
@@ -391,6 +530,7 @@ export default function MultiCameraViewer() {
                 <GPSViewer
                   currentData={currentData}
                   allData={sessionData.timeline}
+                  gpsData={sessionData.gpsData}
                 />
               </TabsContent>
 
@@ -418,6 +558,8 @@ export default function MultiCameraViewer() {
               </span>
               <span>•</span>
               <span>{sessionData.gpsData.length} GPS points</span>
+              <span>•</span>
+              <span>Server: {serverUrl}</span>
             </div>
             <div className="flex items-center gap-4">
               <span>Current: {currentData.timestamp}</span>
