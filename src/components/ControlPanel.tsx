@@ -190,7 +190,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Server Connection Info */}
-      <Card>
+      {/* <Card>
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
             <CardTitle className="flex items-center gap-2">
@@ -222,7 +222,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* Session Info */}
       <Card>

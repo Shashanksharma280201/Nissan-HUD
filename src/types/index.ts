@@ -1,4 +1,4 @@
-// types.ts - Updated types for server API integration
+// types/index.ts - Complete types for surveillance system
 export interface DetectionData {
   frameNum: number;
   streamId: number;
@@ -32,6 +32,7 @@ export interface CameraInfo {
   description?: string;
   detectionCount: number;
   classes: string[];
+  session: string; // This was missing!
 }
 
 export interface SystemMetrics {
@@ -125,13 +126,15 @@ export interface MetadataFile {
 
 // Camera configurations for UI
 export const CAMERA_CONFIGS = [
+  // F2 Session - GPS data source (2 cameras)
   {
     name: '4kcam',
     displayName: '4K Camera',
     type: 'High Resolution',
     resolution: '4096x2160',
     color: '#3B82F6',
-    description: 'High-resolution 4K road inspection camera'
+    description: 'High-resolution 4K road inspection camera',
+    session: 'F2'
   },
   {
     name: 'cam1',
@@ -139,7 +142,19 @@ export const CAMERA_CONFIGS = [
     type: 'Standard',
     resolution: '1920x1080',
     color: '#10B981',
-    description: 'Standard resolution road inspection camera'
+    description: 'Standard resolution road inspection camera',
+    session: 'F2'
+  },
+  
+  // floMobility123_F1 Session - System metrics source (3 cameras)
+  {
+    name: 'cam1',
+    displayName: 'Camera 1',
+    type: 'Standard',
+    resolution: '1920x1080',
+    color: '#8B5CF6',
+    description: 'Standard resolution road inspection camera',
+    session: 'floMobility123_F1'
   },
   {
     name: 'argus0',
@@ -147,7 +162,8 @@ export const CAMERA_CONFIGS = [
     type: 'Multi-sensor',
     resolution: '1920x1080',
     color: '#F59E0B',
-    description: 'Multi-sensor inspection camera'
+    description: 'Multi-sensor inspection camera',
+    session: 'floMobility123_F1'
   },
   {
     name: 'argus1',
@@ -155,7 +171,8 @@ export const CAMERA_CONFIGS = [
     type: 'Multi-sensor',
     resolution: '1920x1080',
     color: '#EF4444',
-    description: 'Multi-sensor inspection camera'
+    description: 'Multi-sensor inspection camera',
+    session: 'floMobility123_F1'
   }
 ];
 
@@ -179,7 +196,11 @@ export const CLASS_COLORS: { [key: string]: string } = {
   'water': '#06B6D4',
   'vegetation': '#22C55E',
   'shadow': '#64748B',
-  'reflection': '#94A3B8'
+  'reflection': '#94A3B8',
+  'pole': '#9333EA',
+  'sign': '#0EA5E9',
+  'barrier': '#DC2626',
+  'white_line_blur': '#64748B'
 };
 
 // Server endpoints
@@ -223,4 +244,21 @@ export interface LoadingStatus {
   state: LoadingState;
   error?: AppError;
   progress?: number;
+}
+
+// Session type enum for better type safety
+export enum SessionType {
+  F2 = 'F2',
+  FloMobility_F1 = 'floMobility123_F1'
+}
+
+// Camera configuration with session enum
+export interface CameraConfig {
+  name: string;
+  displayName: string;
+  type: string;
+  resolution: string;
+  color: string;
+  description: string;
+  session: SessionType | string;
 }

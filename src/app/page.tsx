@@ -14,7 +14,9 @@ import {
   Eye,
   EyeOff,
   Monitor,
-  ServerCrash
+  ServerCrash,
+  Database,
+  FolderOpen
 } from 'lucide-react';
 
 // Import our custom components
@@ -25,25 +27,42 @@ import ControlPanel from '../components/ControlPanel';
 
 // Import utilities and types
 import { DataLoader } from '../utils/dataLoader';
-import { SessionData } from '../types';
+import { SessionData, CameraInfo } from '../types';
 
-// Camera configurations for UI
+// If you're using the types from the artifacts above, use this instead:
+// import { SessionData, CameraInfo } from '../types/index';
+
+// Camera configurations for UI - Updated to match actual data structure
 export const CAMERA_CONFIGS = [
+  // F2 Session - GPS data source (2 cameras)
   {
     name: '4kcam',
     displayName: '4K Camera',
     type: 'High Resolution',
     resolution: '4096x2160',
     color: '#3B82F6',
-    description: 'High-resolution 4K road inspection camera'
+    description: 'High-resolution 4K road inspection camera',
+    session: 'F2'
   },
   {
     name: 'cam1',
-    displayName: 'Camera 1',
+    displayName: 'Camera 1 (F2)',
     type: 'Standard',
     resolution: '1920x1080',
     color: '#10B981',
-    description: 'Standard resolution road inspection camera'
+    description: 'Standard resolution road inspection camera - F2 session',
+    session: 'F2'
+  },
+  
+  // floMobility123_F1 Session - System metrics source (3 cameras)
+  {
+    name: 'cam1',
+    displayName: 'Camera 1 (F1)',
+    type: 'Standard',
+    resolution: '1920x1080',
+    color: '#8B5CF6',
+    description: 'Standard resolution road inspection camera - F1 session',
+    session: 'floMobility123_F1'
   },
   {
     name: 'argus0',
@@ -51,7 +70,8 @@ export const CAMERA_CONFIGS = [
     type: 'Multi-sensor',
     resolution: '1920x1080',
     color: '#F59E0B',
-    description: 'Multi-sensor inspection camera'
+    description: 'Multi-sensor inspection camera',
+    session: 'floMobility123_F1'
   },
   {
     name: 'argus1',
@@ -59,7 +79,8 @@ export const CAMERA_CONFIGS = [
     type: 'Multi-sensor',
     resolution: '1920x1080',
     color: '#EF4444',
-    description: 'Multi-sensor inspection camera'
+    description: 'Multi-sensor inspection camera',
+    session: 'floMobility123_F1'
   }
 ];
 
@@ -74,7 +95,8 @@ export default function MultiCameraViewer() {
   const [serverUrl, setServerUrl] = useState('http://localhost:8081');
   const [dataLoader] = useState(() => new DataLoader(serverUrl));
   const [visibleCameras, setVisibleCameras] = useState<{[key: string]: boolean}>({});
-  const [activeTab, setActiveTab] = useState('cameras');
+  const [activeTab, setActiveTab] = useState('f2');
+  const [activeSessionTab, setActiveSessionTab] = useState('f2');
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   
   // Refs for interval management
@@ -82,6 +104,22 @@ export default function MultiCameraViewer() {
 
   // Current frame data
   const currentData = sessionData?.timeline[currentIndex];
+
+  // Filter cameras by session - handle cam1 appearing in both sessions
+  const f2Cameras = sessionData?.cameras.filter(camera => {
+    // For F2: include 4kcam and cam1 from F2 session
+    return camera.session === 'F2' || 
+           (camera.name === '4kcam') || 
+           (camera.name === 'cam1' && camera.session === 'F2');
+  }) || [];
+  
+  const f1Cameras = sessionData?.cameras.filter(camera => {
+    // For F1: include argus0, argus1, and cam1 from F1 session
+    return camera.session === 'floMobility123_F1' || 
+           (camera.name === 'argus0') || 
+           (camera.name === 'argus1') ||
+           (camera.name === 'cam1' && camera.session === 'floMobility123_F1');
+  }) || [];
 
   // Check server health on mount
   useEffect(() => {
@@ -98,7 +136,7 @@ export default function MultiCameraViewer() {
   // Auto-play functionality
   useEffect(() => {
     if (isPlaying && sessionData) {
-      const interval = 1000 / playbackSpeed; // Convert speed to interval
+      const interval = 1000 / playbackSpeed;
       playbackIntervalRef.current = setInterval(() => {
         setCurrentIndex(prev => {
           if (prev >= sessionData.timeline.length - 1) {
@@ -214,15 +252,17 @@ export default function MultiCameraViewer() {
     }));
   }, []);
 
-  const toggleAllCameras = useCallback((visible: boolean) => {
+  const toggleAllCameras = useCallback((visible: boolean, session?: string) => {
     if (sessionData) {
-      const newVisibility: {[key: string]: boolean} = {};
-      sessionData.cameras.forEach(camera => {
+      const newVisibility: {[key: string]: boolean} = { ...visibleCameras };
+      const camerasToToggle = session === 'F2' ? f2Cameras : session === 'floMobility123_F1' ? f1Cameras : sessionData.cameras;
+      
+      camerasToToggle.forEach(camera => {
         newVisibility[camera.name] = visible;
       });
       setVisibleCameras(newVisibility);
     }
-  }, [sessionData]);
+  }, [sessionData, visibleCameras, f2Cameras, f1Cameras]);
 
   // Server disconnected state
   if (serverStatus === 'disconnected') {
@@ -354,7 +394,7 @@ export default function MultiCameraViewer() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex flex-col w-full bg-red-400 h-full">
       {/* Header */}
       <div className="border-b bg-white">
         <div className="max-w-7xl mx-auto px-6 py-4">
@@ -365,13 +405,13 @@ export default function MultiCameraViewer() {
                 Surveillance Data Viewer
               </h1>
               <p className="text-gray-600 text-sm mt-1">
-                Real-time visualization of road inspection data from multiple camera sources
+                Multi-session road inspection data from F2 and floMobility123_F1
               </p>
             </div>
             <div className="flex items-center gap-4">
               <Badge variant="outline" className="px-3 py-1">
                 <Monitor className="w-4 h-4 mr-2" />
-                {sessionData.cameras.length} Cameras Active
+                {sessionData.cameras.length} Cameras Total
               </Badge>
               <Badge variant="secondary" className="px-3 py-1">
                 Frame {currentIndex + 1} / {sessionData.timeline.length}
@@ -385,7 +425,7 @@ export default function MultiCameraViewer() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="flex w-full mx-auto px-6 py-6">
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
           
           {/* Control Panel - Left Sidebar */}
@@ -408,121 +448,143 @@ export default function MultiCameraViewer() {
           <div className="xl:col-span-3">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
               
-              {/* Tab Navigation */}
-              <div className="flex items-center justify-between">
-                <TabsList className="grid w-full max-w-md grid-cols-3">
-                  <TabsTrigger value="cameras" className="flex items-center gap-2">
-                    <Camera className="w-4 h-4" />
-                    Cameras
-                  </TabsTrigger>
-                  <TabsTrigger value="gps" className="flex items-center gap-2">
-                    <Navigation className="w-4 h-4" />
-                    GPS
-                  </TabsTrigger>
-                  <TabsTrigger value="system" className="flex items-center gap-2">
-                    <Activity className="w-4 h-4" />
-                    System
-                  </TabsTrigger>
-                </TabsList>
-
-                {/* Camera Visibility Controls */}
-                {activeTab === 'cameras' && (
-                  <div className="flex items-center gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => toggleAllCameras(true)}
-                    >
-                      <Eye className="w-4 h-4 mr-2" />
-                      Show All
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => toggleAllCameras(false)}
-                    >
-                      <EyeOff className="w-4 h-4 mr-2" />
-                      Hide All
-                    </Button>
-                  </div>
-                )}
-              </div>
+              {/* Main Tab Navigation */}
+              <TabsList className="grid w-full max-w-md grid-cols-3">
+                <TabsTrigger value="cameras" className="flex items-center gap-2">
+                  <Camera className="w-4 h-4" />
+                  Cameras
+                </TabsTrigger>
+                <TabsTrigger value="gps" className="flex items-center gap-2">
+                  <Navigation className="w-4 h-4" />
+                  GPS
+                </TabsTrigger>
+                <TabsTrigger value="system" className="flex items-center gap-2">
+                  <Activity className="w-4 h-4" />
+                  System
+                </TabsTrigger>
+              </TabsList>
 
               {/* Cameras Tab */}
               <TabsContent value="cameras" className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {sessionData.cameras.map(camera => {
-                    const cameraConfig = CAMERA_CONFIGS.find(c => c.name === camera.name);
-                    return (
-                      <CameraViewer
-                        key={camera.name}
-                        cameraName={camera.name}
-                        data={currentData}
-                        isVisible={visibleCameras[camera.name] || false}
-                        onToggleVisibility={() => toggleCameraVisibility(camera.name)}
-                        // serverUrl={serverUrl}
-                        className="h-fit"
-                      />
-                    );
-                  })}
-                </div>
+                {/* Session Tabs for Cameras */}
+                <Tabs value={activeSessionTab} onValueChange={setActiveSessionTab} className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <TabsList className="grid w-full max-w-md grid-cols-2">
+                      <TabsTrigger value="f2" className="flex items-center gap-2">
+                        <FolderOpen className="w-4 h-4" />
+                        F2 Session ({f2Cameras.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="f1" className="flex items-center gap-2">
+                        <Database className="w-4 h-4" />
+                        FloMobility F1 ({f1Cameras.length})
+                      </TabsTrigger>
+                    </TabsList>
 
-                {/* Camera Summary */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Camera className="w-5 h-5" />
-                      Camera Summary
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {sessionData.cameras.map(camera => {
-                        const config = CAMERA_CONFIGS.find(c => c.name === camera.name);
-                        const currentDetections = currentData.detections.filter(d => {
-                          if (camera.name === '4kcam') return d.streamId >= 100;
-                          return d.streamId < 100;
-                        });
-                        
-                        return (
-                          <div key={camera.name} className="p-3 border rounded-lg">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div 
-                                className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: config?.color }}
-                              />
-                              <span className="font-medium text-sm">{config?.displayName}</span>
-                            </div>
-                            <div className="space-y-1 text-xs text-gray-600">
-                              <div className="flex justify-between">
-                                <span>Type:</span>
-                                <Badge variant="outline" className="text-xs">
-                                  {config?.type}
-                                </Badge>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Resolution:</span>
-                                <span>{config?.resolution}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Current:</span>
-                                <span>{currentDetections.length} detections</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Total:</span>
-                                <span>{camera.detectionCount} detections</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Classes:</span>
-                                <span>{camera.classes.length}</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    {/* Session-specific Camera Controls */}
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => toggleAllCameras(true, activeSessionTab === 'f2' ? 'F2' : 'floMobility123_F1')}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        Show All
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => toggleAllCameras(false, activeSessionTab === 'f2' ? 'F2' : 'floMobility123_F1')}
+                      >
+                        <EyeOff className="w-4 h-4 mr-2" />
+                        Hide All
+                      </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+
+                  {/* F2 Session Cameras */}
+                  <TabsContent value="f2" className="space-y-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <FolderOpen className="w-5 h-5 text-blue-500" />
+                          F2 Session - GPS & High-Resolution Cameras
+                        </CardTitle>
+                        <p className="text-sm text-gray-600">
+                          GPS data source with 4K camera and standard camera feed
+                        </p>
+                      </CardHeader>
+                    </Card>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {f2Cameras.map(camera => (
+                        <CameraViewer
+                          key={`${camera.name}_F2`}
+                          cameraName={camera.name}
+                          data={currentData}
+                          isVisible={visibleCameras[camera.name] || false}
+                          onToggleVisibility={() => toggleCameraVisibility(camera.name)}
+                          serverUrl={serverUrl}
+                          cameraSession="F2"
+                          className="h-fit"
+                        />
+                      ))}
+                    </div>
+
+                    {f2Cameras.length === 0 && (
+                      <Card>
+                        <CardContent className="text-center py-8">
+                          <Camera className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-lg font-semibold mb-2">No F2 Cameras Available</h3>
+                          <p className="text-sm text-gray-600">
+                            No camera data found for F2 session. Check server data structure.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </TabsContent>
+
+                  {/* FloMobility123_F1 Session Cameras */}
+                  <TabsContent value="f1" className="space-y-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Database className="w-5 h-5 text-green-500" />
+                          FloMobility123_F1 Session - Multi-Sensor Array
+                        </CardTitle>
+                        <p className="text-sm text-gray-600">
+                          System metrics source with Argus cameras and standard camera feed
+                        </p>
+                      </CardHeader>
+                    </Card>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {f1Cameras.map(camera => (
+                        <CameraViewer
+                          key={`${camera.name}_F1`}
+                          cameraName={camera.name}
+                          data={currentData}
+                          isVisible={visibleCameras[camera.name] || false}
+                          onToggleVisibility={() => toggleCameraVisibility(camera.name)}
+                          serverUrl={serverUrl}
+                          cameraSession="floMobility123_F1"
+                          className="h-fit"
+                        />
+                      ))}
+                    </div>
+
+                    {f1Cameras.length === 0 && (
+                      <Card>
+                        <CardContent className="text-center py-8">
+                          <Camera className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-lg font-semibold mb-2">No F1 Cameras Available</h3>
+                          <p className="text-sm text-gray-600">
+                            No camera data found for floMobility123_F1 session. Check server data structure.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </TabsContent>
 
               {/* GPS Tab */}
@@ -551,7 +613,7 @@ export default function MultiCameraViewer() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between text-sm text-gray-600">
             <div className="flex items-center gap-4">
-              <span>Session: {sessionData.sessionName}</span>
+              <span>Sessions: F2 ({f2Cameras.length} cams) | F1 ({f1Cameras.length} cams)</span>
               <span>•</span>
               <span>
                 {sessionData.timeline.reduce((sum, data) => sum + data.detections.length, 0)} total detections
@@ -572,58 +634,6 @@ export default function MultiCameraViewer() {
           </div>
         </div>
       </div>
-
-      {/* Global Styles */}
-      <style jsx global>{`
-        .slider {
-          background: linear-gradient(to right, #3B82F6 0%, #3B82F6 ${(currentIndex / Math.max(sessionData.timeline.length - 1, 1)) * 100}%, #E5E7EB ${(currentIndex / Math.max(sessionData.timeline.length - 1, 1)) * 100}%, #E5E7EB 100%);
-        }
-        
-        .text-shadow {
-          text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-        }
-        
-        /* Custom scrollbar for better UX */
-        ::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        
-        ::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 3px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 3px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
-        }
-        
-        /* Animation for smooth transitions */
-        .camera-transition {
-          transition: all 0.3s ease-in-out;
-        }
-        
-        /* Loading shimmer effect */
-        @keyframes shimmer {
-          0% {
-            background-position: -468px 0;
-          }
-          100% {
-            background-position: 468px 0;
-          }
-        }
-        
-        .shimmer {
-          animation: shimmer 1.5s ease-in-out infinite;
-          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-          background-size: 468px 100%;
-        }
-      `}</style>
     </div>
   );
 }
