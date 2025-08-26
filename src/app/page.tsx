@@ -1,635 +1,605 @@
-"use client"
+// src/app/page.tsx
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { 
-  Camera, 
-  Navigation, 
-  Activity, 
-  Loader2, 
-  AlertCircle,
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  Camera as CameraIcon,
+  Database,
   Eye,
   EyeOff,
+  FolderOpen,
+  Navigation,
+  Cpu,
+  HardDrive,
+  Thermometer,
+  Zap,
   Monitor,
-  ServerCrash,
-  Database,
-  FolderOpen
-} from 'lucide-react';
+  AlertCircle,
+} from "lucide-react";
 
-// Import our custom components
-import CameraViewer from '../components/CameraViewer';
-import SystemDashboard from '../components/SystemDashboard';
-import GPSViewer from '../components/GPSViewer';
-import ControlPanel from '../components/ControlPanel';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 
-// Import utilities and types
-import { DataLoader } from '../utils/dataLoader';
-import { SessionData, CameraInfo } from '../types';
+// Panels / viewers
+import ControlPanel from "@/components/ControlPanel";
+import GPSViewer from "@/components/GPSViewer";
+import CameraAnomalyExplorer from "@/components/CameraAnomalyExplorer";
+import GPSControlPanel from "@/components/GPSControlPanel";
 
-// If you're using the types from the artifacts above, use this instead:
-// import { SessionData, CameraInfo } from '../types/index';
+// ---- Types to match your DataLoader & components ----
+interface DetectionData {
+  frameNum: number;
+  streamId: number;
+  className: string;
+  confidence: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  timestamp?: string;
+  imagePath?: string;
+}
 
-// Camera configurations for UI - Updated to match actual data structure
-export const CAMERA_CONFIGS = [
-  // F2 Session - GPS data source (2 cameras)
-  {
-    name: '4kcam',
-    displayName: '4K Camera',
-    type: 'High Resolution',
-    resolution: '4096x2160',
-    color: '#3B82F6',
-    description: 'High-resolution 4K road inspection camera',
-    session: 'F2'
-  },
-  {
-    name: 'cam1',
-    displayName: 'Camera 1 (F2)',
-    type: 'Standard',
-    resolution: '1920x1080',
-    color: '#10B981',
-    description: 'Standard resolution road inspection camera - F2 session',
-    session: 'F2'
-  },
+interface ImageData {
+  timestamp: string;
+  date: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  detections: DetectionData[];
+  images: { [cameraName: string]: { [className: string]: string[] } };
+  fullPaths: { [cameraName: string]: { [className: string]: string[] } };
+}
+
+interface CameraInfo {
+  name: string;
+  displayName: string;
+  type: string;
+  resolution: string;
+  color: string;
+  description?: string;
+  detectionCount: number;
+  classes: string[];
+  session: string;
+  imageCount: number;
+}
+
+interface SystemMetrics {
+  timestamp: string;
+  time: string;
+  date: string;
+  cpu_usage_percent: number;
+  gpu_usage_percent: number;
+  memory_usage_percent: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  swap_usage_percent: number;
+  swap_used_mb: number;
+  swap_total_mb: number;
+  disk_usage_percent: number;
+  disk_used_gb: number;
+  disk_total_gb: number;
+  cpu_temp_celsius: number;
+  gpu_temp_celsius: number;
+  thermal_temp_celsius: number;
+  fan_speed_percent: number;
+  power_total_watts: number;
+  power_cpu_watts: number;
+  power_gpu_watts: number;
+  uptime_seconds: number;
+}
+
+export interface GPSData {
+  timestamp: string;
+  time: string;
+  date: string;
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+  speed?: number;
+  heading?: number;
+}
+
+interface SessionData {
+  sessionName: string;
+  sessionPath: string;
+  cameras: CameraInfo[];
+  timeline: ImageData[];
+  gpsData: GPSData[];
+  systemMetrics: SystemMetrics[];
+}
+
+// System Metrics Dashboard Component
+const SystemMetricsDashboard: React.FC<{ metrics: SystemMetrics[] }> = ({ metrics }) => {
+  const latestMetrics = metrics[metrics.length - 1];
   
-  // floMobility123_F1 Session - System metrics source (3 cameras)
-  {
-    name: 'cam1',
-    displayName: 'Camera 1 (F1)',
-    type: 'Standard',
-    resolution: '1920x1080',
-    color: '#8B5CF6',
-    description: 'Standard resolution road inspection camera - F1 session',
-    session: 'floMobility123_F1'
-  },
-  {
-    name: 'argus0',
-    displayName: 'Argus Camera 0',
-    type: 'Multi-sensor',
-    resolution: '1920x1080',
-    color: '#F59E0B',
-    description: 'Multi-sensor inspection camera',
-    session: 'floMobility123_F1'
-  },
-  {
-    name: 'argus1',
-    displayName: 'Argus Camera 1',
-    type: 'Multi-sensor',
-    resolution: '1920x1080',
-    color: '#EF4444',
-    description: 'Multi-sensor inspection camera',
-    session: 'floMobility123_F1'
-  }
-];
-
-export default function MultiCameraViewer() {
-  // State management
-  const [sessionData, setSessionData] = useState<SessionData | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [serverUrl, setServerUrl] = useState('http://localhost:8081');
-  const [dataLoader] = useState(() => new DataLoader(serverUrl));
-  const [visibleCameras, setVisibleCameras] = useState<{[key: string]: boolean}>({});
-  const [activeTab, setActiveTab] = useState('f2');
-  const [activeSessionTab, setActiveSessionTab] = useState('f2');
-  const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
-  
-  // Refs for interval management
-  const playbackIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
-
-  // Current frame data
-  const currentData = sessionData?.timeline[currentIndex];
-
-  // Filter cameras by session - handle cam1 appearing in both sessions
-  const f2Cameras = sessionData?.cameras.filter(camera => {
-    // For F2: include 4kcam and cam1 from F2 session
-    return camera.session === 'F2' || 
-          (camera.name === '4kcam') || 
-          (camera.name === 'cam1' && camera.session === 'F2');
-  }) || [];
-  
-  const f1Cameras = sessionData?.cameras.filter(camera => {
-    // For F1: include argus0, argus1, and cam1 from F1 session
-    return camera.session === 'floMobility123_F1' || 
-          (camera.name === 'argus0') || 
-          (camera.name === 'argus1') ||
-          (camera.name === 'cam1' && camera.session === 'floMobility123_F1');
-  }) || [];
-
-  // Check server health on mount
-  useEffect(() => {
-    checkServerHealth();
-  }, []);
-
-  // Load initial session data
-  useEffect(() => {
-    if (serverStatus === 'connected') {
-      loadSessionData();
-    }
-  }, [serverStatus]);
-
-  // Auto-play functionality
-  useEffect(() => {
-    if (isPlaying && sessionData) {
-      const interval = 1000 / playbackSpeed;
-      playbackIntervalRef.current = setInterval(() => {
-        setCurrentIndex(prev => {
-          if (prev >= sessionData.timeline.length - 1) {
-            setIsPlaying(false);
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, interval);
-    } else {
-      if (playbackIntervalRef.current) {
-        clearInterval(playbackIntervalRef.current);
-        playbackIntervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (playbackIntervalRef.current) {
-        clearInterval(playbackIntervalRef.current);
-        playbackIntervalRef.current = null;
-      }
-    };
-  }, [isPlaying, playbackSpeed, sessionData]);
-
-  // Initialize camera visibility
-  useEffect(() => {
-    if (sessionData) {
-      const initialVisibility: {[key: string]: boolean} = {};
-      sessionData.cameras.forEach(camera => {
-        initialVisibility[camera.name] = true;
-      });
-      setVisibleCameras(initialVisibility);
-    }
-  }, [sessionData]);
-
-  const checkServerHealth = async () => {
-    setServerStatus('checking');
-    try {
-      const response = await fetch(`${serverUrl}/health`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Server health check:', data);
-        setServerStatus('connected');
-      } else {
-        setServerStatus('disconnected');
-        setError('Server is not responding properly');
-      }
-    } catch (error) {
-      console.error('Server health check failed:', error);
-      setServerStatus('disconnected');
-      setError('Cannot connect to surveillance server. Make sure it\'s running on http://localhost:8081');
-    }
-  };
-
-  const loadSessionData = async (customUrl?: string) => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      if (customUrl) {
-        setServerUrl(customUrl);
-        dataLoader.setBasePath(customUrl);
-      }
-      
-      console.log('Loading session data from server...');
-      const data = await dataLoader.loadSession();
-      
-      if (data.timeline.length === 0) {
-        throw new Error('No timeline data found. Please check if the server has GPS data and camera metadata.');
-      }
-      
-      setSessionData(data);
-      setCurrentIndex(0);
-      console.log('Session loaded successfully:', data);
-      
-    } catch (error) {
-      console.error('Failed to load session:', error);
-      setError(error instanceof Error ? error.message : 'Unknown error occurred');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handlePlayPause = useCallback(() => {
-    setIsPlaying(prev => !prev);
-  }, []);
-
-  const handleIndexChange = useCallback((newIndex: number) => {
-    if (sessionData && newIndex >= 0 && newIndex < sessionData.timeline.length) {
-      setCurrentIndex(newIndex);
-    }
-  }, [sessionData]);
-
-  const handleSpeedChange = useCallback((speed: number) => {
-    setPlaybackSpeed(speed);
-  }, []);
-
-  const handleLoadSession = useCallback((url: string) => {
-    loadSessionData(url);
-  }, []);
-
-  const handleRefresh = useCallback(() => {
-    checkServerHealth();
-    if (serverStatus === 'connected') {
-      loadSessionData();
-    }
-  }, [serverStatus]);
-
-  const toggleCameraVisibility = useCallback((cameraName: string) => {
-    setVisibleCameras(prev => ({
-      ...prev,
-      [cameraName]: !prev[cameraName]
-    }));
-  }, []);
-
-  const toggleAllCameras = useCallback((visible: boolean, session?: string) => {
-    if (sessionData) {
-      const newVisibility: {[key: string]: boolean} = { ...visibleCameras };
-      const camerasToToggle = session === 'F2' ? f2Cameras : session === 'floMobility123_F1' ? f1Cameras : sessionData.cameras;
-      
-      camerasToToggle.forEach(camera => {
-        newVisibility[camera.name] = visible;
-      });
-      setVisibleCameras(newVisibility);
-    }
-  }, [sessionData, visibleCameras, f2Cameras, f1Cameras]);
-
-  // Server disconnected state
-  if (serverStatus === 'disconnected') {
+  if (!latestMetrics) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-600">
-              <ServerCrash className="w-5 h-5" />
-              Server Connection Failed
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-700 mb-2">
-                Cannot connect to the surveillance data server.
-              </p>
-              <p className="text-sm text-red-600">
-                Make sure your server.js is running on <code className="bg-red-100 px-1 py-0.5 rounded">http://localhost:8081</code>
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <h4 className="font-medium">To start the server:</h4>
-              <div className="bg-gray-100 p-3 rounded-lg text-sm font-mono">
-                <div>cd /path/to/your/server</div>
-                <div>node server.js</div>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={checkServerHealth} variant="outline">
-                <Loader2 className="w-4 h-4 mr-2" />
-                Retry Connection
-              </Button>
-              <Button onClick={() => setServerUrl('http://localhost:8082')} variant="outline">
-                Try Port 8082
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Loading state
-  if (isLoading || serverStatus === 'checking') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-500" />
-          <h2 className="text-xl font-semibold mb-2">
-            {serverStatus === 'checking' ? 'Connecting to Server' : 'Loading Session Data'}
-          </h2>
-          <p className="text-gray-600">
-            {serverStatus === 'checking' 
-              ? 'Checking surveillance server connection...'
-              : 'Please wait while we load your multi-camera surveillance data...'
-            }
-          </p>
-          <div className="mt-4 text-sm text-gray-500">
-            Server: {serverUrl}
-          </div>
+          <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-500">No system metrics available</p>
         </div>
       </div>
     );
   }
 
-  // Error state
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-600">
-              <AlertCircle className="w-5 h-5" />
-              Error Loading Data
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">{error}</p>
-            <div className="flex gap-2">
-              <Button onClick={handleRefresh} variant="outline">
-                <Loader2 className="w-4 h-4 mr-2" />
-                Retry
-              </Button>
-              <Button onClick={() => setError(null)}>
-                Continue Anyway
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const formatUptime = (seconds: number) => {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${days}d ${hours}h ${minutes}m`;
+  };
 
-  // No data state
-  if (!sessionData || !currentData) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Camera className="w-5 h-5" />
-              No Data Available
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">
-              No session data found. The server is connected but has no data to display.
-            </p>
-            <div className="space-y-2">
-              <p className="text-sm text-gray-500">
-                Expected data files:
-              </p>
-              <ul className="text-sm text-gray-500 list-disc list-inside space-y-1">
-                <li>F2/gps_log.csv - GPS coordinates</li>
-                <li>floMobility123_F1/system_metrics.csv - System data</li>
-                <li>*/metadata.csv - Camera detections</li>
-              </ul>
-            </div>
-            <Button onClick={handleRefresh} variant="outline" className="mt-4">
-              Check Server Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const getStatusColor = (percentage: number) => {
+    if (percentage > 90) return "bg-red-500";
+    if (percentage > 70) return "bg-yellow-500";
+    return "bg-green-500";
+  };
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className="space-y-6">
+      {/* Overview Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">CPU Usage</CardTitle>
+            <Cpu className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{latestMetrics.cpu_usage_percent.toFixed(1)}%</div>
+            <Progress 
+              value={latestMetrics.cpu_usage_percent} 
+              className="mt-2"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">GPU Usage</CardTitle>
+            <Monitor className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{latestMetrics.gpu_usage_percent.toFixed(1)}%</div>
+            <Progress 
+              value={latestMetrics.gpu_usage_percent} 
+              className="mt-2"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Memory</CardTitle>
+            <Database className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{latestMetrics.memory_usage_percent.toFixed(1)}%</div>
+            <div className="text-xs text-muted-foreground">
+              {(latestMetrics.memory_used_mb / 1024).toFixed(1)}GB / {(latestMetrics.memory_total_mb / 1024).toFixed(1)}GB
+            </div>
+            <Progress 
+              value={latestMetrics.memory_usage_percent} 
+              className="mt-2"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Disk Usage</CardTitle>
+            <HardDrive className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{latestMetrics.disk_usage_percent.toFixed(1)}%</div>
+            <div className="text-xs text-muted-foreground">
+              {latestMetrics.disk_used_gb.toFixed(1)}GB / {latestMetrics.disk_total_gb.toFixed(1)}GB
+            </div>
+            <Progress 
+              value={latestMetrics.disk_usage_percent} 
+              className="mt-2"
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Temperature and Power */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Thermometer className="w-5 h-5" />
+              Temperature Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm">CPU Temperature</span>
+              <span className="text-lg font-semibold">{latestMetrics.cpu_temp_celsius}°C</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">GPU Temperature</span>
+              <span className="text-lg font-semibold">{latestMetrics.gpu_temp_celsius}°C</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">Thermal Temperature</span>
+              <span className="text-lg font-semibold">{latestMetrics.thermal_temp_celsius}°C</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">Fan Speed</span>
+              <span className="text-lg font-semibold">{latestMetrics.fan_speed_percent}%</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="w-5 h-5" />
+              Power Consumption
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm">Total Power</span>
+              <span className="text-lg font-semibold">{latestMetrics.power_total_watts}W</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">CPU Power</span>
+              <span className="text-lg font-semibold">{latestMetrics.power_cpu_watts}W</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">GPU Power</span>
+              <span className="text-lg font-semibold">{latestMetrics.power_gpu_watts}W</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm">System Uptime</span>
+              <span className="text-lg font-semibold">{formatUptime(latestMetrics.uptime_seconds)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* System Info */}
+      <Card>
+        <CardHeader>
+          <CardTitle>System Information</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground">Last Updated</p>
+              <p className="font-medium">{latestMetrics.time}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Date</p>
+              <p className="font-medium">{latestMetrics.date}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Swap Usage</p>
+              <p className="font-medium">{latestMetrics.swap_usage_percent.toFixed(1)}%</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total Records</p>
+              <p className="font-medium">{metrics.length}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// ---- Helper: GPSData[] -> ImageData[] so GPSViewer gets the right shape ----
+const gpsToImageData = (gpsData: GPSData[]): ImageData[] =>
+  gpsData.map((g) => ({
+    timestamp: g.timestamp,
+    date: g.date,
+    time: g.time,
+    latitude: g.latitude,
+    longitude: g.longitude,
+    detections: [],
+    images: {},
+    fullPaths: {},
+  }));
+
+// ---- Demo loader fallback (replace with your DataLoader instance) ----
+async function fetchSession(serverUrl: string): Promise<SessionData> {
+  try {
+    const dash = await fetch(`${serverUrl}/api/dashboard`).then((r) => r.json());
+    const gps = await fetch(`${serverUrl}/api/gps-data`)
+      .then((r) => r.json())
+      .catch(() => ({ success: false, data: [] }));
+    const sys = await fetch(`${serverUrl}/api/system-metrics`)
+      .then((r) => r.json())
+      .catch(() => ({ success: false, data: [] }));
+
+    console.log('System metrics response:', sys); // Debug log
+
+    // Build minimal session shape so page renders right away
+    const gpsData: GPSData[] = (gps?.success ? gps.data : []).map((row: any) => ({
+      timestamp:
+        row.timestamp || `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
+      date: row.date ?? "2025-01-01",
+      time: row.time ?? "00:00:00",
+      latitude: parseFloat(row.latitude ?? row.lat ?? 0),
+      longitude: parseFloat(row.longitude ?? row.lng ?? row.lon ?? 0),
+      altitude: row.altitude ? parseFloat(row.altitude) : undefined,
+      speed: row.speed ? parseFloat(row.speed) : undefined,
+      heading: row.heading ? parseFloat(row.heading) : undefined,
+    }));
+
+    // Process system metrics
+    const systemMetrics: SystemMetrics[] = (sys?.success ? sys.data : []).map((row: any) => ({
+      timestamp: row.timestamp || `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
+      time: row.time ?? "00:00:00",
+      date: row.date ?? "2025-01-01",
+      cpu_usage_percent: parseFloat(row.cpu_usage_percent ?? 0),
+      gpu_usage_percent: parseFloat(row.gpu_usage_percent ?? 0),
+      memory_usage_percent: parseFloat(row.memory_usage_percent ?? 0),
+      memory_used_mb: parseFloat(row.memory_used_mb ?? 0),
+      memory_total_mb: parseFloat(row.memory_total_mb ?? 0),
+      swap_usage_percent: parseFloat(row.swap_usage_percent ?? 0),
+      swap_used_mb: parseFloat(row.swap_used_mb ?? 0),
+      swap_total_mb: parseFloat(row.swap_total_mb ?? 0),
+      disk_usage_percent: parseFloat(row.disk_usage_percent ?? 0),
+      disk_used_gb: parseFloat(row.disk_used_gb ?? 0),
+      disk_total_gb: parseFloat(row.disk_total_gb ?? 0),
+      cpu_temp_celsius: parseFloat(row.cpu_temp_celsius ?? 0),
+      gpu_temp_celsius: parseFloat(row.gpu_temp_celsius ?? 0),
+      thermal_temp_celsius: parseFloat(row.thermal_temp_celsius ?? 0),
+      fan_speed_percent: parseFloat(row.fan_speed_percent ?? 0),
+      power_total_watts: parseFloat(row.power_total_watts ?? 0),
+      power_cpu_watts: parseFloat(row.power_cpu_watts ?? 0),
+      power_gpu_watts: parseFloat(row.power_gpu_watts ?? 0),
+      uptime_seconds: parseFloat(row.uptime_seconds ?? 0),
+    }));
+
+    // Create a tiny timeline aligned with GPS to show something initially
+    const timeline: ImageData[] = gpsToImageData(
+      gpsData.length ? gpsData.slice(0, 50) : []
+    );
+
+    const cameras: CameraInfo[] = Object.entries(
+      dash?.summary?.anomalies ?? {}
+    ).flatMap(([camName, classes]: [string, any]) => {
+      const imgCount = Object.values(classes ?? {}).reduce(
+        (s: number, c: any) => s + (c?.imageCount ?? 0),
+        0
+      );
+      const detCount = Object.values(classes ?? {}).reduce(
+        (s: number, c: any) => s + (c?.recordCount ?? 0),
+        0
+      );
+      const sessions = new Set<string>();
+      Object.values(classes ?? {}).forEach(
+        (c: any) => c?.session && sessions.add(c.session)
+      );
+      const session = Array.from(sessions)[0] ?? "F2";
+      return [
+        {
+          name: camName,
+          displayName: camName,
+          type: "Unknown",
+          resolution: "1920x1080",
+          color: "#6B7280",
+          description: `Auto from dashboard`,
+          detectionCount: detCount,
+          classes: Object.keys(classes ?? {}),
+          session,
+          imageCount: imgCount,
+        },
+      ];
+    });
+
+    return {
+      sessionName: dash?.success ? "Surveillance Session" : "Local Session",
+      sessionPath: serverUrl,
+      cameras,
+      timeline,
+      gpsData,
+      systemMetrics,
+    };
+  } catch (error) {
+    console.error('Failed to fetch session data:', error);
+    return {
+      sessionName: "Error Loading Session",
+      sessionPath: serverUrl,
+      cameras: [],
+      timeline: [],
+      gpsData: [],
+      systemMetrics: [],
+    };
+  }
+}
+
+export default function Page() {
+  // ---- Config ----
+  const [serverUrl, setServerUrl] = useState("http://localhost:8081");
+
+  // ---- Data ----
+  const [sessionData, setSessionData] = useState<SessionData>({
+    sessionName: "Loading…",
+    sessionPath: serverUrl,
+    cameras: [],
+    timeline: [],
+    gpsData: [],
+    systemMetrics: [],
+  });
+
+  // ---- Global timeline playback (ControlPanel drives this) ----
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState<"explorer" | "gps" | "system">(
+    "explorer"
+  );
+
+  // Derived
+  const currentData: ImageData =
+    sessionData.timeline[currentIndex] ||
+    ({
+      timestamp: "N/A",
+      date: "N/A",
+      time: "N/A",
+      latitude: 0,
+      longitude: 0,
+      detections: [],
+      images: {},
+      fullPaths: {},
+    } as ImageData);
+
+  // ---- Load session on mount / server change ----
+  useEffect(() => {
+    (async () => {
+      const data = await fetchSession(serverUrl);
+      setSessionData(data);
+      setCurrentIndex(0);
+    })();
+  }, [serverUrl]);
+
+  // ---- Playback tick ----
+  useEffect(() => {
+    if (!isPlaying) return;
+    if (!sessionData.timeline.length) return;
+    const id = setInterval(() => {
+      setCurrentIndex((i) => (i + 1) % sessionData.timeline.length);
+    }, Math.max(50, 1000 / playbackSpeed));
+    return () => clearInterval(id);
+  }, [isPlaying, playbackSpeed, sessionData.timeline.length]);
+
+  // ---- Control handlers for ControlPanel ----
+  const handleIndexChange = (i: number) =>
+    setCurrentIndex(Math.max(0, Math.min(sessionData.timeline.length - 1, i)));
+  const handlePlayPause = () => setIsPlaying((p) => !p);
+  const handleSpeedChange = (s: number) => setPlaybackSpeed(s);
+
+  const handleLoadSession = (url: string) => {
+    setServerUrl(url || "http://localhost:8081");
+  };
+
+  const handleRefresh = async () => {
+    const data = await fetchSession(serverUrl);
+    setSessionData(data);
+    setCurrentIndex(0);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="border-b bg-white">
+      <div className="border-b bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2">
-                <Camera className="w-6 h-6" />
-                Retrofit Dashboard
-              </h1>
+              <h1 className="text-2xl font-semibold text-gray-900">Retrofit Dashboard</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                Session: {sessionData.sessionName} • Server: {serverUrl}
+              </p>
             </div>
-            <div className="flex items-center gap-4">
-              <Badge variant="outline" className="px-3 py-1">
-                <Monitor className="w-4 h-4 mr-2" />
-                {sessionData.cameras.length} Cameras Total
-              </Badge>
-              <Badge variant="secondary" className="px-3 py-1">
-                Frame {currentIndex + 1} / {sessionData.timeline.length}
-              </Badge>
-              <Badge variant="outline" className="px-3 py-1 text-green-600">
-                Server Connected
-              </Badge>
+            <div className="text-right text-sm text-gray-500">
+              <div>Timeline: {sessionData.timeline.length} frames</div>
+              <div>GPS: {sessionData.gpsData.length} points</div>
+              <div>Cameras: {sessionData.cameras.length}</div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex w-full mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          
-          {/* Control Panel - Left Sidebar */}
-          <div className="xl:col-span-1">
-            <ControlPanel
-              sessionData={sessionData}
-              currentIndex={currentIndex}
-              isPlaying={isPlaying}
-              playbackSpeed={playbackSpeed}
-              onIndexChange={handleIndexChange}
-              onPlayPause={handlePlayPause}
-              onSpeedChange={handleSpeedChange}
-              onLoadSession={handleLoadSession}
-              onRefresh={handleRefresh}
-              serverUrl={serverUrl}
-            />
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v: any) => setActiveTab(v)}
+          className="w-full"
+        >
+          {/* Tab Navigation */}
+          <div className="flex justify-center mb-6">
+            <TabsList className="grid w-full max-w-md grid-cols-3">
+              <TabsTrigger
+                value="explorer"
+                className="flex items-center gap-2"
+              >
+                <CameraIcon className="w-4 h-4" />
+                Cameras
+              </TabsTrigger>
+              <TabsTrigger value="gps" className="flex items-center gap-2">
+                <Navigation className="w-4 h-4" />
+                GPS
+              </TabsTrigger>
+              <TabsTrigger value="system" className="flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                System
+              </TabsTrigger>
+            </TabsList>
           </div>
 
-          {/* Main Content Area */}
-          <div className="xl:col-span-3">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-              
-              {/* Main Tab Navigation */}
-              <TabsList className="grid w-full max-w-md grid-cols-3">
-                <TabsTrigger value="cameras" className="flex items-center gap-2">
-                  <Camera className="w-4 h-4" />
-                  Cameras
-                </TabsTrigger>
-                <TabsTrigger value="gps" className="flex items-center gap-2">
-                  <Navigation className="w-4 h-4" />
-                  GPS
-                </TabsTrigger>
-                <TabsTrigger value="system" className="flex items-center gap-2">
-                  <Activity className="w-4 h-4" />
-                  System
-                </TabsTrigger>
-              </TabsList>
+          {/* Tab Content */}
+          <div className="w-full">
+            {/* Camera Explorer Tab */}
+            <TabsContent value="explorer" className="mt-0">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-blue-500" />
+                    Camera / Anomaly Explorer
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CameraAnomalyExplorer serverUrl={serverUrl} />
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-              {/* Cameras Tab */}
-              <TabsContent value="cameras" className="space-y-6">
-                {/* Session Tabs for Cameras */}
-                <Tabs value={activeSessionTab} onValueChange={setActiveSessionTab} className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <TabsList className="grid w-full max-w-md grid-cols-2">
-                      <TabsTrigger value="f2" className="flex items-center gap-2">
-                        <FolderOpen className="w-4 h-4" />
-                        F2 Session ({f2Cameras.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="f1" className="flex items-center gap-2">
-                        <Database className="w-4 h-4" />
-                        FloMobility F1 ({f1Cameras.length})
-                      </TabsTrigger>
-                    </TabsList>
+            {/* GPS Tab */}
+            <TabsContent value="gps" className="mt-0">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-1">
+                  {typeof GPSControlPanel === "function" && (
+                    <GPSControlPanel
+                      gpsData={sessionData.gpsData}
+                      currentIndex={currentIndex}
+                      isPlaying={isPlaying}
+                      playbackSpeed={playbackSpeed}
+                      onIndexChange={handleIndexChange}
+                      onPlayPause={handlePlayPause}
+                      onSpeedChange={handleSpeedChange}
+                    />
+                  )}
+                </div>
+                <div className="lg:col-span-3">
+                  <GPSViewer
+                    currentData={
+                      gpsToImageData(sessionData.gpsData)[currentIndex] ??
+                      gpsToImageData(sessionData.gpsData)[0]
+                    }
+                    allData={gpsToImageData(sessionData.gpsData)}
+                    gpsData={sessionData.gpsData}
+                  />
+                </div>
+              </div>
+            </TabsContent>
 
-                    {/* Session-specific Camera Controls */}
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => toggleAllCameras(true, activeSessionTab === 'f2' ? 'F2' : 'floMobility123_F1')}
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        Show All
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => toggleAllCameras(false, activeSessionTab === 'f2' ? 'F2' : 'floMobility123_F1')}
-                      >
-                        <EyeOff className="w-4 h-4 mr-2" />
-                        Hide All
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* F2 Session Cameras */}
-                  <TabsContent value="f2" className="space-y-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <FolderOpen className="w-5 h-5 text-blue-500" />
-                          F2 Session - GPS & High-Resolution Cameras
-                        </CardTitle>
-                        <p className="text-sm text-gray-600">
-                          GPS data source with 4K camera and standard camera feed
-                        </p>
-                      </CardHeader>
-                    </Card>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {f2Cameras.map(camera => (
-                        <CameraViewer
-                          key={`${camera.name}_F2`}
-                          cameraName={camera.name}
-                          data={currentData}
-                          isVisible={visibleCameras[camera.name] || false}
-                          onToggleVisibility={() => toggleCameraVisibility(camera.name)}
-                          serverUrl={serverUrl}
-                          cameraSession="F2"
-                          className="h-fit"
-                        />
-                      ))}
-                    </div>
-
-                    {f2Cameras.length === 0 && (
-                      <Card>
-                        <CardContent className="text-center py-8">
-                          <Camera className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-lg font-semibold mb-2">No F2 Cameras Available</h3>
-                          <p className="text-sm text-gray-600">
-                            No camera data found for F2 session. Check server data structure.
-                          </p>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </TabsContent>
-
-                  {/* FloMobility123_F1 Session Cameras */}
-                  <TabsContent value="f1" className="space-y-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Database className="w-5 h-5 text-green-500" />
-                          FloMobility123_F1 Session - Multi-Sensor Array
-                        </CardTitle>
-                        <p className="text-sm text-gray-600">
-                          System metrics source with Argus cameras and standard camera feed
-                        </p>
-                      </CardHeader>
-                    </Card>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {f1Cameras.map(camera => (
-                        <CameraViewer
-                          key={`${camera.name}_F1`}
-                          cameraName={camera.name}
-                          data={currentData}
-                          isVisible={visibleCameras[camera.name] || false}
-                          onToggleVisibility={() => toggleCameraVisibility(camera.name)}
-                          serverUrl={serverUrl}
-                          cameraSession="floMobility123_F1"
-                          className="h-fit"
-                        />
-                      ))}
-                    </div>
-
-                    {f1Cameras.length === 0 && (
-                      <Card>
-                        <CardContent className="text-center py-8">
-                          <Camera className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-lg font-semibold mb-2">No F1 Cameras Available</h3>
-                          <p className="text-sm text-gray-600">
-                            No camera data found for floMobility123_F1 session. Check server data structure.
-                          </p>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
-
-              {/* GPS Tab */}
-              <TabsContent value="gps">
-                <GPSViewer
-                  currentData={currentData}
-                  allData={sessionData.timeline}
-                  gpsData={sessionData.gpsData}
-                />
-              </TabsContent>
-
-              {/* System Tab */}
-              <TabsContent value="system">
-                <SystemDashboard
-                  metrics={sessionData.systemMetrics}
-                />
-              </TabsContent>
-
-            </Tabs>
+            {/* System Metrics Tab */}
+            <TabsContent value="system" className="mt-0">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="w-5 h-5" />
+                    System Metrics Dashboard
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SystemMetricsDashboard metrics={sessionData.systemMetrics} />
+                </CardContent>
+              </Card>
+            </TabsContent>
           </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="border-t bg-white mt-8">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <div className="flex items-center gap-4">
-              <span>Sessions: F2 ({f2Cameras.length} cams) | F1 ({f1Cameras.length} cams)</span>
-              <span>•</span>
-              <span>
-                {sessionData.timeline.reduce((sum, data) => sum + data.detections.length, 0)} total detections
-              </span>
-              <span>•</span>
-              <span>{sessionData.gpsData.length} GPS points</span>
-              <span>•</span>
-              <span>Server: {serverUrl}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <span>Current: {currentData.timestamp}</span>
-              <span>•</span>
-              <span>
-                Lat: {currentData.latitude.toFixed(6)}, 
-                Lng: {currentData.longitude.toFixed(6)}
-              </span>
-            </div>
-          </div>
-        </div>
+        </Tabs>
       </div>
     </div>
   );

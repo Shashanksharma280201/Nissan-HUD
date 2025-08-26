@@ -54,9 +54,11 @@ interface GPSViewerProps {
   allData: ImageData[];
   gpsData: GPSData[];
   className?: string;
+  /** Optional label showing which CSV/endpoint supplied gpsData */
+  gpsLabel?: string; // NEW
 }
 
-const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, className = '' }) => {
+const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, className = '', gpsLabel }) => {
   const [streetViewLoaded, setStreetViewLoaded] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -480,7 +482,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, cl
             <div className="flex items-center gap-2">
               <Badge variant={gpsData.length > 0 ? "default" : "secondary"} className="text-xs">
                 <Route className="w-3 h-3 mr-1" />
-                {gpsData.length > 0 ? 'GPS Log Data' : 'Timeline Data'}
+                {gpsData.length > 0 ? (gpsLabel || 'GPS Log Data') : 'Timeline Data'}
               </Badge>
               <Button 
                 variant="outline" 
@@ -510,7 +512,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, cl
               <div>
                 <div className="text-sm font-medium">Data Source</div>
                 <div className="text-xs text-gray-600">
-                  {gpsData.length > 0 ? 'F2/gps_log.csv' : 'Timeline coordinates'}
+                  {gpsData.length > 0 ? (gpsLabel || 'GPS Log Data') : 'Timeline coordinates'}
                 </div>
                 <div className="text-xs text-gray-600">{routeData.length} points</div>
               </div>
