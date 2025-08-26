@@ -109,16 +109,16 @@ export default function MultiCameraViewer() {
   const f2Cameras = sessionData?.cameras.filter(camera => {
     // For F2: include 4kcam and cam1 from F2 session
     return camera.session === 'F2' || 
-           (camera.name === '4kcam') || 
-           (camera.name === 'cam1' && camera.session === 'F2');
+          (camera.name === '4kcam') || 
+          (camera.name === 'cam1' && camera.session === 'F2');
   }) || [];
   
   const f1Cameras = sessionData?.cameras.filter(camera => {
     // For F1: include argus0, argus1, and cam1 from F1 session
     return camera.session === 'floMobility123_F1' || 
-           (camera.name === 'argus0') || 
-           (camera.name === 'argus1') ||
-           (camera.name === 'cam1' && camera.session === 'floMobility123_F1');
+          (camera.name === 'argus0') || 
+          (camera.name === 'argus1') ||
+          (camera.name === 'cam1' && camera.session === 'floMobility123_F1');
   }) || [];
 
   // Check server health on mount
@@ -394,7 +394,7 @@ export default function MultiCameraViewer() {
   }
 
   return (
-    <div className="flex flex-col w-full bg-red-400 h-full">
+    <div className="flex flex-col w-full h-full">
       {/* Header */}
       <div className="border-b bg-white">
         <div className="max-w-7xl mx-auto px-6 py-4">
@@ -402,11 +402,8 @@ export default function MultiCameraViewer() {
             <div>
               <h1 className="text-2xl font-bold flex items-center gap-2">
                 <Camera className="w-6 h-6" />
-                Surveillance Data Viewer
+                Retrofit Dashboard
               </h1>
-              <p className="text-gray-600 text-sm mt-1">
-                Multi-session road inspection data from F2 and floMobility123_F1
-              </p>
             </div>
             <div className="flex items-center gap-4">
               <Badge variant="outline" className="px-3 py-1">
