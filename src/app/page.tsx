@@ -5,22 +5,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Camera as CameraIcon,
-  Database,
-  Eye,
-  EyeOff,
   FolderOpen,
   Navigation,
-  Cpu,
-  HardDrive,
-  Thermometer,
-  Zap,
-  Monitor,
-  AlertCircle,
 } from "lucide-react";
+
+// Import your existing SystemDashboard component
+import SystemDashboard from "@/components/SystemDashboard";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
 
 // Panels / viewers
 import ControlPanel from "@/components/ControlPanel";
@@ -111,187 +104,7 @@ interface SessionData {
   systemMetrics: SystemMetrics[];
 }
 
-// System Metrics Dashboard Component
-const SystemMetricsDashboard: React.FC<{ metrics: SystemMetrics[] }> = ({ metrics }) => {
-  const latestMetrics = metrics[metrics.length - 1];
-  
-  if (!latestMetrics) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500">No system metrics available</p>
-        </div>
-      </div>
-    );
-  }
-
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${minutes}m`;
-  };
-
-  const getStatusColor = (percentage: number) => {
-    if (percentage > 90) return "bg-red-500";
-    if (percentage > 70) return "bg-yellow-500";
-    return "bg-green-500";
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">CPU Usage</CardTitle>
-            <Cpu className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{latestMetrics.cpu_usage_percent.toFixed(1)}%</div>
-            <Progress 
-              value={latestMetrics.cpu_usage_percent} 
-              className="mt-2"
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">GPU Usage</CardTitle>
-            <Monitor className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{latestMetrics.gpu_usage_percent.toFixed(1)}%</div>
-            <Progress 
-              value={latestMetrics.gpu_usage_percent} 
-              className="mt-2"
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Memory</CardTitle>
-            <Database className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{latestMetrics.memory_usage_percent.toFixed(1)}%</div>
-            <div className="text-xs text-muted-foreground">
-              {(latestMetrics.memory_used_mb / 1024).toFixed(1)}GB / {(latestMetrics.memory_total_mb / 1024).toFixed(1)}GB
-            </div>
-            <Progress 
-              value={latestMetrics.memory_usage_percent} 
-              className="mt-2"
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Disk Usage</CardTitle>
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{latestMetrics.disk_usage_percent.toFixed(1)}%</div>
-            <div className="text-xs text-muted-foreground">
-              {latestMetrics.disk_used_gb.toFixed(1)}GB / {latestMetrics.disk_total_gb.toFixed(1)}GB
-            </div>
-            <Progress 
-              value={latestMetrics.disk_usage_percent} 
-              className="mt-2"
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Temperature and Power */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Thermometer className="w-5 h-5" />
-              Temperature Status
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-sm">CPU Temperature</span>
-              <span className="text-lg font-semibold">{latestMetrics.cpu_temp_celsius}°C</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">GPU Temperature</span>
-              <span className="text-lg font-semibold">{latestMetrics.gpu_temp_celsius}°C</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">Thermal Temperature</span>
-              <span className="text-lg font-semibold">{latestMetrics.thermal_temp_celsius}°C</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">Fan Speed</span>
-              <span className="text-lg font-semibold">{latestMetrics.fan_speed_percent}%</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="w-5 h-5" />
-              Power Consumption
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-sm">Total Power</span>
-              <span className="text-lg font-semibold">{latestMetrics.power_total_watts}W</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">CPU Power</span>
-              <span className="text-lg font-semibold">{latestMetrics.power_cpu_watts}W</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">GPU Power</span>
-              <span className="text-lg font-semibold">{latestMetrics.power_gpu_watts}W</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">System Uptime</span>
-              <span className="text-lg font-semibold">{formatUptime(latestMetrics.uptime_seconds)}</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* System Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>System Information</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">Last Updated</p>
-              <p className="font-medium">{latestMetrics.time}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Date</p>
-              <p className="font-medium">{latestMetrics.date}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Swap Usage</p>
-              <p className="font-medium">{latestMetrics.swap_usage_percent.toFixed(1)}%</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Total Records</p>
-              <p className="font-medium">{metrics.length}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
+// Import your existing SystemDashboard component
 
 // ---- Helper: GPSData[] -> ImageData[] so GPSViewer gets the right shape ----
 const gpsToImageData = (gpsData: GPSData[]): ImageData[] =>
@@ -359,9 +172,7 @@ async function fetchSession(serverUrl: string): Promise<SessionData> {
     }));
 
     // Create a tiny timeline aligned with GPS to show something initially
-    const timeline: ImageData[] = gpsToImageData(
-      gpsData.length ? gpsData.slice(0, 50) : []
-    );
+    const timeline: ImageData[] = gpsToImageData(gpsData);
 
     const cameras: CameraInfo[] = Object.entries(
       dash?.summary?.anomalies ?? {}
@@ -586,17 +397,7 @@ export default function Page() {
 
             {/* System Metrics Tab */}
             <TabsContent value="system" className="mt-0">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="w-5 h-5" />
-                    System Metrics Dashboard
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <SystemMetricsDashboard metrics={sessionData.systemMetrics} />
-                </CardContent>
-              </Card>
+              <SystemDashboard metrics={sessionData.systemMetrics} />
             </TabsContent>
           </div>
         </Tabs>
