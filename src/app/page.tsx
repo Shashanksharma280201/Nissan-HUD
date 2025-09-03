@@ -20,6 +20,8 @@ import ControlPanel from "@/components/ControlPanel";
 import GPSViewer from "@/components/GPSViewer";
 import CameraAnomalyExplorer from "@/components/CameraAnomalyExplorer";
 import GPSControlPanel from "@/components/GPSControlPanel";
+import { ChartBarMultiple } from "@/components/Barchart";
+import { Calendar22 } from "@/components/DatePicker";
 
 // ---- Types to match your DataLoader & components ----
 interface DetectionData {
@@ -122,7 +124,9 @@ const gpsToImageData = (gpsData: GPSData[]): ImageData[] =>
 // ---- Demo loader fallback (replace with your DataLoader instance) ----
 async function fetchSession(serverUrl: string): Promise<SessionData> {
   try {
-    const dash = await fetch(`${serverUrl}/api/dashboard`).then((r) => r.json());
+    const dash = await fetch(`${serverUrl}/api/dashboard`).then((r) =>
+      r.json()
+    );
     const gps = await fetch(`${serverUrl}/api/gps-data`)
       .then((r) => r.json())
       .catch(() => ({ success: false, data: [] }));
@@ -130,46 +134,53 @@ async function fetchSession(serverUrl: string): Promise<SessionData> {
       .then((r) => r.json())
       .catch(() => ({ success: false, data: [] }));
 
-    console.log('System metrics response:', sys); // Debug log
+    console.log("System metrics response:", sys); // Debug log
 
     // Build minimal session shape so page renders right away
-    const gpsData: GPSData[] = (gps?.success ? gps.data : []).map((row: any) => ({
-      timestamp:
-        row.timestamp || `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
-      date: row.date ?? "2025-01-01",
-      time: row.time ?? "00:00:00",
-      latitude: parseFloat(row.latitude ?? row.lat ?? 0),
-      longitude: parseFloat(row.longitude ?? row.lng ?? row.lon ?? 0),
-      altitude: row.altitude ? parseFloat(row.altitude) : undefined,
-      speed: row.speed ? parseFloat(row.speed) : undefined,
-      heading: row.heading ? parseFloat(row.heading) : undefined,
-    }));
+    const gpsData: GPSData[] = (gps?.success ? gps.data : []).map(
+      (row: any) => ({
+        timestamp:
+          row.timestamp ||
+          `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
+        date: row.date ?? "2025-01-01",
+        time: row.time ?? "00:00:00",
+        latitude: parseFloat(row.latitude ?? row.lat ?? 0),
+        longitude: parseFloat(row.longitude ?? row.lng ?? row.lon ?? 0),
+        altitude: row.altitude ? parseFloat(row.altitude) : undefined,
+        speed: row.speed ? parseFloat(row.speed) : undefined,
+        heading: row.heading ? parseFloat(row.heading) : undefined,
+      })
+    );
 
     // Process system metrics
-    const systemMetrics: SystemMetrics[] = (sys?.success ? sys.data : []).map((row: any) => ({
-      timestamp: row.timestamp || `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
-      time: row.time ?? "00:00:00",
-      date: row.date ?? "2025-01-01",
-      cpu_usage_percent: parseFloat(row.cpu_usage_percent ?? 0),
-      gpu_usage_percent: parseFloat(row.gpu_usage_percent ?? 0),
-      memory_usage_percent: parseFloat(row.memory_usage_percent ?? 0),
-      memory_used_mb: parseFloat(row.memory_used_mb ?? 0),
-      memory_total_mb: parseFloat(row.memory_total_mb ?? 0),
-      swap_usage_percent: parseFloat(row.swap_usage_percent ?? 0),
-      swap_used_mb: parseFloat(row.swap_used_mb ?? 0),
-      swap_total_mb: parseFloat(row.swap_total_mb ?? 0),
-      disk_usage_percent: parseFloat(row.disk_usage_percent ?? 0),
-      disk_used_gb: parseFloat(row.disk_used_gb ?? 0),
-      disk_total_gb: parseFloat(row.disk_total_gb ?? 0),
-      cpu_temp_celsius: parseFloat(row.cpu_temp_celsius ?? 0),
-      gpu_temp_celsius: parseFloat(row.gpu_temp_celsius ?? 0),
-      thermal_temp_celsius: parseFloat(row.thermal_temp_celsius ?? 0),
-      fan_speed_percent: parseFloat(row.fan_speed_percent ?? 0),
-      power_total_watts: parseFloat(row.power_total_watts ?? 0),
-      power_cpu_watts: parseFloat(row.power_cpu_watts ?? 0),
-      power_gpu_watts: parseFloat(row.power_gpu_watts ?? 0),
-      uptime_seconds: parseFloat(row.uptime_seconds ?? 0),
-    }));
+    const systemMetrics: SystemMetrics[] = (sys?.success ? sys.data : []).map(
+      (row: any) => ({
+        timestamp:
+          row.timestamp ||
+          `${row.date ?? "2025-01-01"} ${row.time ?? "00:00:00"}`,
+        time: row.time ?? "00:00:00",
+        date: row.date ?? "2025-01-01",
+        cpu_usage_percent: parseFloat(row.cpu_usage_percent ?? 0),
+        gpu_usage_percent: parseFloat(row.gpu_usage_percent ?? 0),
+        memory_usage_percent: parseFloat(row.memory_usage_percent ?? 0),
+        memory_used_mb: parseFloat(row.memory_used_mb ?? 0),
+        memory_total_mb: parseFloat(row.memory_total_mb ?? 0),
+        swap_usage_percent: parseFloat(row.swap_usage_percent ?? 0),
+        swap_used_mb: parseFloat(row.swap_used_mb ?? 0),
+        swap_total_mb: parseFloat(row.swap_total_mb ?? 0),
+        disk_usage_percent: parseFloat(row.disk_usage_percent ?? 0),
+        disk_used_gb: parseFloat(row.disk_used_gb ?? 0),
+        disk_total_gb: parseFloat(row.disk_total_gb ?? 0),
+        cpu_temp_celsius: parseFloat(row.cpu_temp_celsius ?? 0),
+        gpu_temp_celsius: parseFloat(row.gpu_temp_celsius ?? 0),
+        thermal_temp_celsius: parseFloat(row.thermal_temp_celsius ?? 0),
+        fan_speed_percent: parseFloat(row.fan_speed_percent ?? 0),
+        power_total_watts: parseFloat(row.power_total_watts ?? 0),
+        power_cpu_watts: parseFloat(row.power_cpu_watts ?? 0),
+        power_gpu_watts: parseFloat(row.power_gpu_watts ?? 0),
+        uptime_seconds: parseFloat(row.uptime_seconds ?? 0),
+      })
+    );
 
     // Create a tiny timeline aligned with GPS to show something initially
     const timeline: ImageData[] = gpsToImageData(gpsData);
@@ -215,7 +226,7 @@ async function fetchSession(serverUrl: string): Promise<SessionData> {
       systemMetrics,
     };
   } catch (error) {
-    console.error('Failed to fetch session data:', error);
+    console.error("Failed to fetch session data:", error);
     return {
       sessionName: "Error Loading Session",
       sessionPath: serverUrl,
@@ -301,28 +312,24 @@ export default function Page() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex flex-col h-full w-full bg-slate-800">
       {/* Header */}
-      <div className="border-b bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Retrofit Dashboard</h1>
-              <p className="text-sm text-gray-600 mt-1">
-                Session: {sessionData.sessionName} • Server: {serverUrl}
-              </p>
-            </div>
-            <div className="text-right text-sm text-gray-500">
-              <div>Timeline: {sessionData.timeline.length} frames</div>
-              <div>GPS: {sessionData.gpsData.length} points</div>
-              <div>Cameras: {sessionData.cameras.length}</div>
-            </div>
+      <div className="flex flex-row w-full p-5 bg-transparent">
+        <div className="flex bg-slate-700/55 rounded-2xl shadow-2xl w-full items-center justify-between">
+          <div className="flex flex-col  w-1/2 p-4">
+            <h1 className="text-2xl font-normal text-gray-300">
+              Retrofit Dashboard of on-Edge AI
+            </h1>
+          </div>
+          <div className="flex flex-row w-full gap-7 justify-end p-4 text-right text-sm text-green-600">
+            <Calendar22 />
+            <p className="flex text-4xl">Flo Mobility</p>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="flex w-full  mx-auto px-6 py-6">
         <Tabs
           value={activeTab}
           onValueChange={(v: any) => setActiveTab(v)}
@@ -330,74 +337,81 @@ export default function Page() {
         >
           {/* Tab Navigation */}
           <div className="flex justify-center mb-6">
-            <TabsList className="grid w-full max-w-md grid-cols-3">
+            <TabsList className="flex w-1/2 h-fit p-2 bg-slate-300">
               <TabsTrigger
-                value="explorer"
+                value="Session Data"
                 className="flex items-center gap-2"
               >
                 <CameraIcon className="w-4 h-4" />
-                Cameras
+                Session Data
               </TabsTrigger>
-              <TabsTrigger value="gps" className="flex items-center gap-2">
+              {/* <TabsTrigger value="gps" className="flex items-center gap-2">
                 <Navigation className="w-4 h-4" />
                 GPS
-              </TabsTrigger>
+              </TabsTrigger> */}
               <TabsTrigger value="system" className="flex items-center gap-2">
                 <Activity className="w-4 h-4" />
                 System
+              </TabsTrigger>
+              <TabsTrigger value="Matrix" className="flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                Matrix
               </TabsTrigger>
             </TabsList>
           </div>
 
           {/* Tab Content */}
-          <div className="w-full">
+          <div className="flex w-full">
             {/* Camera Explorer Tab */}
-            <TabsContent value="explorer" className="mt-0">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+            <TabsContent value="Session Data" className="flex flex-row gap-4 ">
+              <Card className="flex w-1/2 bg-slate-700/65 border-none shadow-xl border-2  border-white">
+                {/* <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-gray-400">
                     <FolderOpen className="w-5 h-5 text-blue-500" />
                     Camera / Anomaly Explorer
                   </CardTitle>
-                </CardHeader>
+                </CardHeader> */}
                 <CardContent>
                   <CameraAnomalyExplorer serverUrl={serverUrl} />
                 </CardContent>
               </Card>
+              <Card className="flex w-1/2 bg-slate-700/65 border-none shadow-xl border-2  border-white p-5">
+                <div className="flex flex-col gap-6">
+                  <div className="lg:col-span-1">
+                    {typeof GPSControlPanel === "function" && (
+                      <GPSControlPanel
+                        gpsData={sessionData.gpsData}
+                        currentIndex={currentIndex}
+                        isPlaying={isPlaying}
+                        playbackSpeed={playbackSpeed}
+                        onIndexChange={handleIndexChange}
+                        onPlayPause={handlePlayPause}
+                        onSpeedChange={handleSpeedChange}
+                      />
+                    )}
+                  </div>
+                  <div className="lg:col-span-3">
+                    <GPSViewer
+                      currentData={
+                        gpsToImageData(sessionData.gpsData)[currentIndex] ??
+                        gpsToImageData(sessionData.gpsData)[0]
+                      }
+                      allData={gpsToImageData(sessionData.gpsData)}
+                      gpsData={sessionData.gpsData}
+                    />
+                  </div>
+                </div>
+              </Card>
             </TabsContent>
 
             {/* GPS Tab */}
-            <TabsContent value="gps" className="mt-0">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div className="lg:col-span-1">
-                  {typeof GPSControlPanel === "function" && (
-                    <GPSControlPanel
-                      gpsData={sessionData.gpsData}
-                      currentIndex={currentIndex}
-                      isPlaying={isPlaying}
-                      playbackSpeed={playbackSpeed}
-                      onIndexChange={handleIndexChange}
-                      onPlayPause={handlePlayPause}
-                      onSpeedChange={handleSpeedChange}
-                    />
-                  )}
-                </div>
-                <div className="lg:col-span-3">
-                  <GPSViewer
-                    currentData={
-                      gpsToImageData(sessionData.gpsData)[currentIndex] ??
-                      gpsToImageData(sessionData.gpsData)[0]
-                    }
-                    allData={gpsToImageData(sessionData.gpsData)}
-                    gpsData={sessionData.gpsData}
-                  />
-                </div>
-              </div>
-            </TabsContent>
 
             {/* System Metrics Tab */}
             <TabsContent value="system" className="mt-0">
               <SystemDashboard metrics={sessionData.systemMetrics} />
+            </TabsContent>
+            <TabsContent value="Matrix" className="flex h-screen">
+              <ChartBarMultiple />
             </TabsContent>
           </div>
         </Tabs>

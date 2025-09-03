@@ -5,13 +5,14 @@ import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Cpu, HardDrive, Thermometer, Zap, Activity, MemoryStick } from 'lucide-react';
 import { SystemMetrics } from '../types';
+import { ChartBarMultiple } from './Barchart';
 
 interface SystemDashboardProps {
   metrics: SystemMetrics[];
   className?: string;
 }
 
-const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = '' }) => {
+const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 'flex flex-col h-screen' }) => {
   const latestMetrics = metrics[metrics.length - 1];
   
   if (!latestMetrics) {
@@ -62,10 +63,12 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
 
   return (
     <div className={`space-y-6 ${className}`}>
+
+      
       {/* Overview Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-700/65 p-5 rounded-2xl shadow-xl">
         {/* CPU Usage */}
-        <Card>
+        <Card className='bg-white/80 backdrop-blur'>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -87,7 +90,7 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
         </Card>
 
         {/* GPU Usage */}
-        <Card>
+        <Card className='bg-white/80 backdrop-blur'>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -109,8 +112,8 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
         </Card>
 
         {/* Memory Usage */}
-        <Card>
-          <CardContent className="p-4">
+        <Card className='bg-white/80 backdrop-blur'>
+          <CardContent className="flex flex-col justify-center p-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -134,7 +137,7 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
         </Card>
 
         {/* Power Consumption */}
-        <Card>
+        <Card className='bg-white/80 backdrop-blur'>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -154,9 +157,9 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-slate-700/65 p-5 rounded-2xl shadow-xl">
         {/* CPU/GPU Usage Chart */}
-        <Card>
+        <Card >
           <CardHeader>
             <CardTitle className="text-sm">CPU & GPU Usage Over Time</CardTitle>
           </CardHeader>
@@ -218,115 +221,7 @@ const SystemDashboard: React.FC<SystemDashboardProps> = ({ metrics, className = 
             </ResponsiveContainer>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Detailed Metrics */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <HardDrive className="w-5 h-5" />
-            System Details
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {/* Storage */}
-            <div>
-              <h4 className="font-medium mb-2 flex items-center gap-2">
-                <HardDrive className="w-4 h-4" />
-                Storage
-              </h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Used:</span>
-                  <span>{formatBytes(latestMetrics.disk_used_gb, 'GB')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Total:</span>
-                  <span>{formatBytes(latestMetrics.disk_total_gb, 'GB')}</span>
-                </div>
-                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-blue-500"
-                    style={{ width: `${Math.min(latestMetrics.disk_usage_percent, 100)}%` }}
-                  />
-                </div>
-                <div className="text-xs text-center">{latestMetrics.disk_usage_percent.toFixed(1)}% used</div>
-              </div>
-            </div>
-
-            {/* Temperature */}
-            <div>
-              <h4 className="font-medium mb-2 flex items-center gap-2">
-                <Thermometer className="w-4 h-4" />
-                Temperature
-              </h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>CPU:</span>
-                  <Badge variant={latestMetrics.cpu_temp_celsius > 80 ? 'destructive' : 'secondary'}>
-                    {latestMetrics.cpu_temp_celsius.toFixed(1)}°C
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>GPU:</span>
-                  <Badge variant={latestMetrics.gpu_temp_celsius > 85 ? 'destructive' : 'secondary'}>
-                    {latestMetrics.gpu_temp_celsius.toFixed(1)}°C
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>Thermal:</span>
-                  <Badge variant={latestMetrics.thermal_temp_celsius > 85 ? 'destructive' : 'secondary'}>
-                    {latestMetrics.thermal_temp_celsius.toFixed(1)}°C
-                  </Badge>
-                </div>
-              </div>
-            </div>
-
-            {/* Memory Details */}
-            <div>
-              <h4 className="font-medium mb-2 flex items-center gap-2">
-                <MemoryStick className="w-4 h-4" />
-                Memory
-              </h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>RAM:</span>
-                  <span>{latestMetrics.memory_usage_percent.toFixed(1)}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Swap:</span>
-                  <span>{latestMetrics.swap_usage_percent.toFixed(1)}%</span>
-                </div>
-                <div className="text-xs text-gray-500">
-                  Swap: {formatBytes(latestMetrics.swap_used_mb)} / {formatBytes(latestMetrics.swap_total_mb)}
-                </div>
-              </div>
-            </div>
-
-            {/* System Info */}
-            <div>
-              <h4 className="font-medium mb-2 flex items-center gap-2">
-                <Activity className="w-4 h-4" />
-                System
-              </h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Fan:</span>
-                  <span>{latestMetrics.fan_speed_percent.toFixed(0)}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Uptime:</span>
-                  <span className="text-xs">{formatUptime(latestMetrics.uptime_seconds)}</span>
-                </div>
-                <div className="text-xs text-gray-500">
-                  Last updated: {latestMetrics.time.split('.')[0]}
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      </div>    
     </div>
   );
 };

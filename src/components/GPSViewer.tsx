@@ -538,7 +538,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, cl
       </Card>
 
       {/* Maps Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="flex flex-col-reverse gap-5">
         {/* Street View */}
         <Card>
           <CardHeader>
@@ -608,7 +608,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, cl
       </div>
 
       {/* GPS Statistics */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Satellite className="w-5 h-5" />
@@ -689,7 +689,7 @@ const GPSViewer: React.FC<GPSViewerProps> = ({ currentData, allData, gpsData, cl
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
     </div>
   );
 };
